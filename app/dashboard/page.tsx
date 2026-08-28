@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
+import { requireAppUser } from "@/lib/app-user";
 
-export default function DashboardIndex() {
-  redirect("/dashboard/customer");
+export default async function DashboardIndex() {
+  const user = await requireAppUser("customer");
+  redirect(user.role === "scout" ? "/dashboard/scout" : "/dashboard/customer");
 }

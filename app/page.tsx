@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { auth } from "@clerk/nextjs/server";
 import {
   IconArrowRight,
   IconBox,
@@ -37,7 +38,8 @@ const missions = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const { userId } = await auth();
   return (
     <main>
       <header className="site-header shell">
@@ -47,7 +49,8 @@ export default function Home() {
           <a href="#missions">What Scouts do</a>
         </nav>
         <div className="header-actions">
-          <Link className="text-link" href="/scout">Become a Scout</Link>
+          <Link className="text-link" href={userId ? "/dashboard" : "/sign-in"}>{userId ? "Dashboard" : "Sign in"}</Link>
+          <Link className="text-link scout-header-link" href="/scout">Become a Scout</Link>
           <Link className="button button-small" href="/request">Send a Scout</Link>
         </div>
       </header>

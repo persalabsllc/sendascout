@@ -1,38 +1,38 @@
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 import {
-  IconArrowRight,
-  IconBell,
-  IconCamera,
-  IconCircleCheck,
-  IconClock,
-  IconCoin,
-  IconDashboard,
-  IconMapPin,
-  IconMenu2,
-  IconPlus,
-  IconRoute,
-  IconSettings,
-  IconShieldCheck,
-  IconTargetArrow,
-  IconUser,
-  IconWallet,
+  IconArrowRight, IconBell, IconCamera, IconCircleCheck, IconClock, IconCoin,
+  IconDashboard, IconMapPin, IconMenu2, IconPlus, IconRoute, IconSettings,
+  IconShieldCheck, IconTargetArrow, IconUser, IconWallet,
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
 
 type Role = "customer" | "scout";
+type MissionKind = "see" | "move" | "meet";
 
-const customerMissions = [
-  { type: "See It", title: "Photograph used equipment", place: "New Bern, NC", status: "Scout matching", time: "Today", icon: IconCamera },
-  { type: "Meet It", title: "Meet HVAC technician", place: "Kinston, NC", status: "Draft", time: "Friday", icon: IconClock },
-];
+export type DashboardMission = {
+  id: string;
+  type: MissionKind;
+  title: string;
+  place: string;
+  status: string;
+  time: string;
+  payoutCents?: number;
+};
 
-const availableMissions = [
-  { type: "See It", title: "Verify condition of boat motor", place: "New Bern, NC", distance: "4.8 mi", payout: "$30", icon: IconCamera },
-  { type: "Move It", title: "Pick up electrical supply order", place: "Kinston → Dover", distance: "11.2 mi", payout: "$38", icon: IconRoute },
-  { type: "Meet It", title: "Wait for appliance technician", place: "Havelock, NC", distance: "18.5 mi", payout: "$36", icon: IconClock },
-];
-
-export function Dashboard({ role }: { role: Role }) {
+export function Dashboard({
+  role,
+  userName,
+  initials,
+  missions = [],
+  profileStatus = "applicant",
+}: {
+  role: Role;
+  userName: string;
+  initials: string;
+  missions?: DashboardMission[];
+  profileStatus?: string;
+}) {
   const scout = role === "scout";
   return (
     <main className="dashboard-page">
@@ -46,66 +46,72 @@ export function Dashboard({ role }: { role: Role }) {
         </nav>
         <div className="dash-sidebar-bottom">
           <Link href="#settings"><IconSettings size={19} /> Settings</Link>
-          <div className="dash-user"><span>KK</span><div><strong>Demo account</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
+          <div className="dash-user"><span>{initials}</span><div><strong>{userName}</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
         </div>
       </aside>
 
       <section className="dash-main">
         <header className="dash-header">
           <button aria-label="Open navigation"><IconMenu2 size={21} /></button>
-          <div><span className="dash-alert"><IconBell size={20} /><i /></span><span className="dash-avatar">KK</span></div>
+          <div><span className="dash-alert"><IconBell size={20} /></span><UserButton /></div>
         </header>
         <div className="dash-content">
           <div className="dash-welcome">
-            <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{scout ? "Good afternoon, Scout." : "Good afternoon, Kyle."}</h1><p>{scout ? "Three nearby missions are ready to be claimed." : "Create a mission or follow along with one already underway."}</p></div>
+            <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{scout ? `Welcome, ${userName}.` : `Welcome, ${userName}.`}</h1><p>{scout ? "Your application and nearby mission opportunities live here." : "Create a mission or follow along with one already underway."}</p></div>
             <Link className="button" href={scout ? "#missions" : "/request"}>{scout ? "Browse missions" : "New mission"} {scout ? <IconArrowRight size={19} /> : <IconPlus size={19} />}</Link>
           </div>
-
-          {scout ? <ScoutOverview /> : <CustomerOverview />}
+          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
     </main>
   );
 }
 
-function CustomerOverview() {
+function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
+  const active = missions.filter((mission) => !["completed", "cancelled"].includes(mission.status)).length;
+  const completed = missions.filter((mission) => mission.status === "completed").length;
   return <>
     <div className="stat-grid">
-      <Stat icon={IconTargetArrow} label="Active missions" value="1" note="Scout matching" />
-      <Stat icon={IconCircleCheck} label="Completed" value="0" note="Your history appears here" />
+      <Stat icon={IconTargetArrow} label="Active missions" value={String(active)} note={active ? "Drafts and active work" : "Create your first mission"} />
+      <Stat icon={IconCircleCheck} label="Completed" value={String(completed)} note="Your completed history" />
       <Stat icon={IconCoin} label="Account credit" value="$0" note="Credits never expire" />
     </div>
     <section className="dash-section" id="missions">
       <div className="dash-section-title"><div><h2>Your missions</h2><p>Drafts and active work in one place.</p></div><Link href="/request">Create mission <IconArrowRight size={17} /></Link></div>
-      <div className="mission-list">
-        {customerMissions.map(({ icon: Icon, ...mission }) => <article key={mission.title}>
-          <span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.type}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "Draft" ? "muted-status" : ""}`}>{mission.status}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} />
-        </article>)}
-      </div>
+      {missions.length ? <div className="mission-list">{missions.map((mission) => {
+        const Icon = iconFor(mission.type);
+        return <article key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></article>;
+      })}</div> : <EmptyMissions customer />}
     </section>
-    <div className="empty-prompt"><span><IconShieldCheck size={30} /></span><div><h3>Payments activate at launch</h3><p>Customer payment will be authorized when a Scout accepts and released after successful completion.</p></div></div>
+    <div className="empty-prompt" id="payments"><span><IconShieldCheck size={30} /></span><div><h3>Payments activate at launch</h3><p>Customer payment will be authorized when a Scout accepts and released after successful completion.</p></div></div>
   </>;
 }
 
-function ScoutOverview() {
+function ScoutOverview({ missions, profileStatus }: { missions: DashboardMission[]; profileStatus: string }) {
+  const payout = missions.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
-    <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>Founding Scout application</strong><p>Connect Clerk and Neon to begin identity verification and activate the live mission board.</p></div><span className="status">Setup pending</span></div>
+    <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>Founding Scout application</strong><p>Your application is saved. Identity and background verification will open before launch.</p></div><span className="status">{statusLabel(profileStatus)}</span></div>
     <div className="stat-grid scout-stats">
-      <Stat icon={IconTargetArrow} label="Nearby missions" value="3" note="Within 25 miles" />
-      <Stat icon={IconCoin} label="Available earnings" value="$104" note="Across open missions" />
+      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(missions.length)} note="Open launch-area missions" />
+      <Stat icon={IconCoin} label="Available earnings" value={money(payout)} note="Across open missions" />
       <Stat icon={IconRoute} label="Completed" value="0" note="Ready for your first" />
     </div>
     <section className="dash-section" id="missions">
-      <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities near your launch area.</p></div><button>Filter <IconSettings size={16} /></button></div>
-      <div className="mission-list scout-list">
-        {availableMissions.map(({ icon: Icon, ...mission }) => <article key={mission.title}>
-          <span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.type}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place} · {mission.distance}</span></div><div className="payout"><small>Scout payout</small><strong>{mission.payout}</strong></div><button className="claim-button">View</button>
-        </article>)}
-      </div>
+      <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities near your launch area.</p></div></div>
+      {missions.length ? <div className="mission-list scout-list">{missions.map((mission) => {
+        const Icon = iconFor(mission.type);
+        return <article key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><button className="claim-button" disabled>Coming soon</button></article>;
+      })}</div> : <EmptyMissions />}
     </section>
   </>;
 }
 
-function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) {
-  return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>;
+function EmptyMissions({ customer = false }: { customer?: boolean }) {
+  return <div className="dashboard-empty"><IconTargetArrow size={30} /><h3>{customer ? "No missions yet" : "The mission board is warming up"}</h3><p>{customer ? "Create your first mission and it will appear here immediately." : "Approved Scouts will see launch-area missions here as customers post them."}</p>{customer && <Link className="button button-small" href="/request">Create a mission</Link>}</div>;
 }
+
+function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) { return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>; }
+function iconFor(type: MissionKind) { return type === "see" ? IconCamera : type === "move" ? IconRoute : IconClock; }
+function labelFor(type: MissionKind) { return type === "see" ? "See It" : type === "move" ? "Move It" : "Meet It"; }
+function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function money(cents: number) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100); }
