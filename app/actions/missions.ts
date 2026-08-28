@@ -263,7 +263,11 @@ export async function confirmMissionComplete(id: string): Promise<Result> {
 export async function adminSetScoutStatus(profileId: string, status: "review" | "approved" | "paused" | "rejected"): Promise<Result> {
   try {
     await requireAdminUser();
-    await getDb().update(scoutProfiles).set({ status, updatedAt: new Date() }).where(eq(scoutProfiles.id, profileId));
+    await getDb().update(scoutProfiles).set({
+      status,
+      approvedAt: status === "approved" ? new Date() : null,
+      updatedAt: new Date(),
+    }).where(eq(scoutProfiles.id, profileId));
     revalidatePath("/control-room");
     return { ok: true };
   } catch (error) {

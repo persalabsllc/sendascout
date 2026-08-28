@@ -36,6 +36,7 @@ export function Dashboard({
   missions = [],
   notifications = [],
   profileStatus = "applicant",
+  showScoutBanner = true,
 }: {
   role: Role;
   userName: string;
@@ -43,6 +44,7 @@ export function Dashboard({
   missions?: DashboardMission[];
   notifications?: DashboardNotification[];
   profileStatus?: string;
+  showScoutBanner?: boolean;
 }) {
   const scout = role === "scout";
   const scoutMission = scout
@@ -78,7 +80,7 @@ export function Dashboard({
               : <Link className="button" href="/request">New mission <IconPlus size={19} /></Link>}
           </div>
           {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div>{notifications[0].missionId && <Link href={`/dashboard/missions/${notifications[0].missionId}`}>Open <IconArrowRight size={17} /></Link>}</section>}
-          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} /> : <CustomerOverview missions={missions} />}
+          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
     </main>
@@ -105,14 +107,14 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
   </>;
 }
 
-function ScoutOverview({ missions, profileStatus }: { missions: DashboardMission[]; profileStatus: string }) {
+function ScoutOverview({ missions, profileStatus, showScoutBanner }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean }) {
   const available = missions.filter((mission) => mission.status === "open" && !mission.assigned);
   const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
   const completed = missions.filter((mission) => mission.assigned && mission.status === "completed");
   const missionBoard = [...active, ...available];
   const earned = completed.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
-    <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>Founding Scout application</strong><p>Your application is saved. Identity and background verification will open before launch.</p></div><span className="status">{statusLabel(profileStatus)}</span></div>
+    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : "Founding Scout application"}</strong><p>{profileStatus === "approved" ? "You’re approved and can claim matching missions in your delivery zone." : "Your application is saved. Identity and background verification will open before launch."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
     <div className="stat-grid scout-stats">
       <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open launch-area missions" />
       <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />

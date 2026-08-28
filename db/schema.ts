@@ -73,6 +73,7 @@ export const scoutProfiles = pgTable("scout_profiles", {
   stripeAccountId: text("stripe_account_id"),
   payoutsEnabled: boolean("payouts_enabled").notNull().default(false),
   verificationConsentedAt: timestamp("verification_consented_at", { withTimezone: true }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
   rating: numeric("rating", { precision: 3, scale: 2 }),
   completedMissions: integer("completed_missions").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

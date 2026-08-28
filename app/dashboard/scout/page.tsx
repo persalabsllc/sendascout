@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { Dashboard, type DashboardMission, type DashboardNotification } from "@/components/dashboard";
 import { getDb } from "@/db";
@@ -11,8 +11,12 @@ export const metadata = { title: "Scout Dashboard | Send a Scout", robots: { ind
 export default async function ScoutDashboard() {
   const user = await requireAppUser("scout");
   const db = getDb();
-  const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-  if (!profile) redirect("/scout");
+  const [profileRow] = await db.select({
+    profile: scoutProfiles,
+    showApprovalBanner: sql<boolean>`${scoutProfiles.status} <> 'approved' OR (${scoutProfiles.approvedAt} IS NOT NULL AND ${scoutProfiles.approvedAt} > now() - interval '24 hours')`,
+  }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
+  if (!profileRow) redirect("/scout");
+  const profile = profileRow.profile;
   const [rows, alertRows] = await Promise.all([
     profile.status === "approved"
       ? db.select().from(missions).where(or(eq(missions.status, "open"), eq(missions.scoutId, user.id))).orderBy(desc(missions.createdAt))
@@ -38,5 +42,5 @@ export default async function ScoutDashboard() {
       return !mission || !["completed", "cancelled", "disputed"].includes(mission.status);
     })
     .map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
-  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} />;
+  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} />;
 }
