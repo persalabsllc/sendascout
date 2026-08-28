@@ -27,6 +27,7 @@ type MissionView = {
   scheduledFor?: string | null;
   customerPriceCents: number;
   scoutPayoutCents: number;
+  largeItem: boolean;
   locationSharingActive: boolean;
   latitude?: number | null;
   longitude?: number | null;
@@ -158,6 +159,7 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
               <div className="panel-heading"><IconRoute size={22} /><div><h2>Mission route</h2><p>{mission.type === "move" ? "Pickup and delivery details" : "Where your Scout is going"}</p></div></div>
               <LocationStop number="1" label={mission.type === "move" ? "Pickup" : "Mission location"} location={mission.pickup} instructions={mission.pickupInstructions} />
               {mission.dropoff && <LocationStop number="2" label="Drop-off" location={mission.dropoff} instructions={mission.deliveryInstructions} />}
+              {mission.type === "move" && <div className="mission-instructions"><strong>Vehicle requirement</strong><p>{mission.largeItem ? "Larger item — SUV, van or pickup truck requested" : "Small item — fits in a car or trunk"}</p></div>}
               <div className="mission-instructions"><strong>Mission instructions</strong><p>{mission.instructions}</p></div>
               {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {new Date(mission.scheduledFor).toLocaleString()}</p>}
             </article>

@@ -4,7 +4,8 @@ import { FormEvent, useState, useTransition } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
 import { IconArrowLeft, IconArrowRight, IconCheck, IconCircleCheck, IconLock } from "@tabler/icons-react";
-import { createMission, createScoutApplication, type MissionInput, type ScoutInput } from "@/app/actions/onboarding";
+import { createMission, createScoutApplication, getMissionPriceQuote, type MissionInput, type ScoutInput } from "@/app/actions/onboarding";
+import type { MissionPriceQuote } from "@/lib/mission-pricing";
 import { Brand } from "./brand";
 
 type Mode = "customer" | "scout";
@@ -14,7 +15,7 @@ const emptyMission: MissionInput = {
   type: "see", address: "", addressLine2: "", city: "", zip: "",
   pickupName: "", pickupAddress: "", pickupAddressLine2: "", pickupCity: "", pickupState: "NC", pickupZip: "", pickupInstructions: "",
   dropoffName: "", dropoffAddress: "", dropoffAddressLine2: "", dropoffCity: "", dropoffState: "NC", dropoffZip: "", deliveryInstructions: "",
-  scheduledFor: "", title: "", instructions: "", phone: "",
+  largeItem: false, scheduledFor: "", title: "", instructions: "", phone: "",
 };
 const emptyScout: ScoutInput = { firstName: "", lastName: "", phone: "", homeZip: "", radius: 25, vehicleType: "", experience: "", canSee: true, canMove: true, canMeet: true, consent: false };
 
@@ -24,6 +25,7 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
   const [complete, setComplete] = useState(false);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [quote, setQuote] = useState<MissionPriceQuote | null>(null);
   const [mission, setMission] = useState<MissionInput>({
     ...emptyMission,
     ...initialMissionAddress,
@@ -48,7 +50,19 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
   function advance(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (step < steps.length - 1) return setStep((value) => value + 1);
+    if (step < steps.length - 1) {
+      if (customer && step === steps.length - 2) {
+        return startTransition(async () => {
+          try {
+            setQuote(await getMissionPriceQuote(mission));
+            setStep((value) => value + 1);
+          } catch {
+            setError("We could not calculate this mission price. Please try again.");
+          }
+        });
+      }
+      return setStep((value) => value + 1);
+    }
     startTransition(async () => {
       const result = customer ? await createMission(mission) : await createScoutApplication(scout);
       if (result.ok) setComplete(true);
@@ -83,7 +97,7 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
           <div className="mobile-progress">Step {step + 1} of {steps.length}<span><i style={{ width: `${((step + 1) / steps.length) * 100}%` }} /></span></div>
           <span className="kicker">{steps[step]}</span><h1>{heading[step]}</h1>
           <p className="form-lede">{customer ? "Clear details help the right Scout claim your mission quickly." : "Founding Scouts get early access to missions and help us shape the marketplace."}</p>
-          <div className="fields">{customer ? <CustomerStep step={step} value={mission} setValue={setMission} /> : <ScoutStep step={step} value={scout} setValue={setScout} email={user?.primaryEmailAddress?.emailAddress ?? "Your verified account email"} />}</div>
+          <div className="fields">{customer ? <CustomerStep step={step} value={mission} setValue={setMission} quote={quote} /> : <ScoutStep step={step} value={scout} setValue={setScout} email={user?.primaryEmailAddress?.emailAddress ?? "Your verified account email"} />}</div>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="form-actions">
             <button type="button" className="button button-ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0 || isPending}><IconArrowLeft size={19} /> Back</button>
@@ -95,16 +109,16 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
   );
 }
 
-function CustomerStep({ step, value, setValue }: { step: number; value: MissionInput; setValue: React.Dispatch<React.SetStateAction<MissionInput>> }) {
+function CustomerStep({ step, value, setValue, quote }: { step: number; value: MissionInput; setValue: React.Dispatch<React.SetStateAction<MissionInput>>; quote: MissionPriceQuote | null }) {
   const set = <K extends keyof MissionInput>(key: K, next: MissionInput[K]) => setValue((old) => ({ ...old, [key]: next }));
   if (step === 0) return <div className="choice-grid">{[["see", "See It", "Photos, video and answers"], ["move", "Move It", "A prepaid item from A to B"], ["meet", "Meet It", "Wait or meet someone for me"]].map(([id, title, text]) => <label className="choice" key={id}><input required type="radio" name="mission" value={id} checked={value.type === id} onChange={() => set("type", id as MissionInput["type"])} /><span><strong>{title}</strong><small>{text}</small></span></label>)}</div>;
-  if (value.type === "move") return <MoveMissionStep step={step} value={value} set={set} />;
+  if (value.type === "move") return <MoveMissionStep step={step} value={value} set={set} quote={quote} />;
   if (step === 1) return <><Field label={value.type === "meet" ? "Meeting location" : "Inspection location"} placeholder="Street address" value={value.address} onChange={(event) => set("address", event.target.value)} /><Field label="Apartment, suite, etc. (optional)" required={false} value={value.addressLine2} onChange={(event) => set("addressLine2", event.target.value)} /><div className="field-row"><Field label="City" placeholder="New Bern" value={value.city} onChange={(event) => set("city", event.target.value)} /><Field label="ZIP code" placeholder="28560" inputMode="numeric" value={value.zip} onChange={(event) => set("zip", event.target.value)} /></div><Field label={value.type === "meet" ? "When should the Scout arrive?" : "When do you need a Scout?"} type="datetime-local" value={value.scheduledFor} onChange={(event) => set("scheduledFor", event.target.value)} /></>;
   if (step === 2) return <><Field label={value.type === "meet" ? "Who or what is the appointment with?" : "What should the Scout inspect?"} placeholder={value.type === "meet" ? "Meet the cable technician at the property" : "Photograph used equipment before purchase"} value={value.title} onChange={(event) => set("title", event.target.value)} /><label className="field"><span>{value.type === "meet" ? "Meeting or waiting instructions" : "Questions, photos and details needed"}</span><textarea required rows={5} placeholder={value.type === "meet" ? "Who to meet, how long to wait, access details and what to confirm…" : "Explain what the Scout should inspect, ask or document…"} value={value.instructions} onChange={(event) => set("instructions", event.target.value)} /></label><Field label="Best phone number" type="tel" placeholder="(252) 555-0123" value={value.phone} onChange={(event) => set("phone", event.target.value)} /></>;
-  return <div className="review-box"><Review label="Mission" value={`${titleCase(value.type)} It`} /><Review label="Location" value={`${value.city || "City"}, NC ${value.zip}`} /><Review label="Timing" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Estimated service" value={value.type === "see" ? "$39" : "$49"} /><p>You won’t be charged yet. Payments and matching will be activated before the soft launch.</p></div>;
+  return <div className="review-box"><Review label="Mission" value={`${titleCase(value.type)} It`} /><Review label="Location" value={`${value.city || "City"}, NC ${value.zip}`} /><Review label="Timing" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Estimated service" value={value.type === "meet" ? "$29 minimum · $25/hour" : money(quote?.customerPriceCents ?? 2900)} /><p>{value.type === "meet" ? "The first hour is included. Additional time is billed in 15-minute increments." : "Includes up to 20 minutes onsite and written findings. Photos or video can be included when the mission calls for them."}</p><p>You won’t be charged yet. Payment authorization activates before the soft launch.</p></div>;
 }
 
-function MoveMissionStep({ step, value, set }: { step: number; value: MissionInput; set: <K extends keyof MissionInput>(key: K, next: MissionInput[K]) => void }) {
+function MoveMissionStep({ step, value, set, quote }: { step: number; value: MissionInput; set: <K extends keyof MissionInput>(key: K, next: MissionInput[K]) => void; quote: MissionPriceQuote | null }) {
   if (step === 1) return <>
     <div className="route-stop-heading"><span>1</span><div><strong>Pickup</strong><small>Where the Scout will collect the item</small></div></div>
     <Field label="Pickup business or person" placeholder="ABC Hardware" value={value.pickupName} onChange={(event) => set("pickupName", event.target.value)} />
@@ -124,10 +138,11 @@ function MoveMissionStep({ step, value, set }: { step: number; value: MissionInp
   </>;
   if (step === 3) return <>
     <Field label="What should the Scout pick up?" placeholder="Prepaid alternator from ABC Auto Parts" value={value.title} onChange={(event) => set("title", event.target.value)} />
+    <div className="choice-grid"><label className="choice"><input type="radio" name="item-size" checked={!value.largeItem} onChange={() => set("largeItem", false)} /><span><strong>Small item</strong><small>Under 25 lb and fits in a car or trunk</small></span></label><label className="choice"><input type="radio" name="item-size" checked={value.largeItem} onChange={() => set("largeItem", true)} /><span><strong>Larger item</strong><small>Needs an SUV, van or pickup truck · +$10</small></span></label></div>
     <label className="field"><span>Item and handling details</span><textarea required rows={5} placeholder="Describe the item, approximate size, whether it is prepaid, fragile or requires special handling…" value={value.instructions} onChange={(event) => set("instructions", event.target.value)} /></label>
     <Field label="Best phone number" type="tel" placeholder="(252) 555-0123" value={value.phone} onChange={(event) => set("phone", event.target.value)} />
   </>;
-  return <div className="review-box move-review"><Review label="Mission" value="Move It" /><Review label="Item" value={value.title || "Item description"} /><Review label="Pickup" value={`${value.pickupName || "Pickup"} · ${formatMovePlace(value.pickupAddress, value.pickupCity, value.pickupState, value.pickupZip)}`} /><Review label="Drop-off" value={`${value.dropoffName || "Drop-off"} · ${formatMovePlace(value.dropoffAddress, value.dropoffCity, value.dropoffState, value.dropoffZip)}`} /><Review label="Pickup time" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Estimated service" value="$49" /><p>You won’t be charged yet. Final pricing can account for distance or unusual item requirements before a Scout accepts.</p></div>;
+  return <div className="review-box move-review"><Review label="Mission" value="Move It" /><Review label="Item" value={value.title || "Item description"} /><Review label="Item class" value={value.largeItem ? "Larger item · SUV, van or pickup" : "Small item · car or trunk"} /><Review label="Pickup" value={`${value.pickupName || "Pickup"} · ${formatMovePlace(value.pickupAddress, value.pickupCity, value.pickupState, value.pickupZip)}`} /><Review label="Drop-off" value={`${value.dropoffName || "Drop-off"} · ${formatMovePlace(value.dropoffAddress, value.dropoffCity, value.dropoffState, value.dropoffZip)}`} /><Review label="Pickup time" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Estimated service" value={money(quote?.customerPriceCents ?? 1900)} />{quote?.estimatedRouteMiles !== null && quote?.estimatedRouteMiles !== undefined && <Review label="Estimated route" value={`${quote.estimatedRouteMiles} mile${quote.estimatedRouteMiles === 1 ? "" : "s"}`} />}<p>Includes the first 3 estimated route miles. Additional miles are $1.75 each. The final route price is confirmed before a Scout accepts.</p><p>You won’t be charged yet.</p></div>;
 }
 
 function ScoutStep({ step, value, setValue, email }: { step: number; value: ScoutInput; setValue: React.Dispatch<React.SetStateAction<ScoutInput>>; email: string }) {
@@ -136,7 +151,7 @@ function ScoutStep({ step, value, setValue, email }: { step: number; value: Scou
   if (step === 1) return <><Field label="Home ZIP code" placeholder="28560" inputMode="numeric" value={value.homeZip} onChange={(event) => set("homeZip", event.target.value)} /><label className="field"><span>How far are you willing to travel?</span><select required value={value.radius} onChange={(event) => set("radius", Number(event.target.value))}><option value={10}>10 miles</option><option value={25}>25 miles</option><option value={50}>50 miles</option><option value={75}>75+ miles</option></select></label><div className="check-grid"><Check label="See It missions" checked={value.canSee} onChange={(checked) => set("canSee", checked)} /><Check label="Move It missions" checked={value.canMove} onChange={(checked) => set("canMove", checked)} /><Check label="Meet It missions" checked={value.canMeet} onChange={(checked) => set("canMeet", checked)} /></div></>;
   if (step === 2) return <><label className="field"><span>Vehicle access</span><select required value={value.vehicleType} onChange={(event) => set("vehicleType", event.target.value)}><option value="" disabled>Select your vehicle</option><option>Car</option><option>SUV</option><option>Pickup truck</option><option>Van</option><option>No vehicle</option></select></label><Field label="Gig-work experience (optional)" required={false} placeholder="DoorDash, Uber, field inspections, courier work…" value={value.experience} onChange={(event) => set("experience", event.target.value)} /><label className="check consent"><input required type="checkbox" checked={value.consent} onChange={(event) => set("consent", event.target.checked)} /> I am at least 18 and agree to identity and background verification before accepting missions.</label></>;
   const access = [value.canSee && "See It", value.canMove && "Move It", value.canMeet && "Meet It"].filter(Boolean).join(" · ");
-  return <div className="review-box"><Review label="Launch area" value={`${value.homeZip} · ${value.radius}+ miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>Submitting joins the pre-launch network. It does not create an employment relationship or guarantee missions.</p></div>;
+  return <div className="review-box"><Review label="Delivery zone" value={`${value.homeZip} · within ${value.radius} miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>You’ll see matching missions anywhere inside your selected delivery zone. Submitting does not create an employment relationship or guarantee missions.</p></div>;
 }
 
 function Field({ label, required = true, ...props }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) { return <label className="field"><span>{label}</span><input required={required} {...props} /></label>; }
@@ -144,3 +159,4 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 function Review({ label, value }: { label: string; value: string }) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 function titleCase(value: string) { return value.charAt(0).toUpperCase() + value.slice(1); }
 function formatMovePlace(address: string, city: string, state: string, zip: string) { return [address, city, state, zip].filter(Boolean).join(", "); }
+function money(cents: number) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100); }

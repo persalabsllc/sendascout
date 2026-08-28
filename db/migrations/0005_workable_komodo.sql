@@ -1,0 +1,1 @@
+ALTER TABLE "missions" ADD COLUMN "large_item" boolean DEFAULT false NOT NULL;

@@ -4,6 +4,7 @@ import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
 import { missionMessages, missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
 export const metadata = { title: "Mission | Send a Scout", robots: { index: false, follow: false } };
 
@@ -21,7 +22,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   else if (user.role === "admin") role = "admin";
   else if (user.role === "scout" && mission.status === "open" && !mission.scoutId) {
     const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-    if (!profile || profile.status !== "approved") notFound();
+    if (!profile || profile.status !== "approved" || !isMissionEligibleForScout(mission, profile)) notFound();
     role = "scout";
     canClaim = true;
   } else notFound();
@@ -65,6 +66,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       scheduledFor: mission.scheduledFor?.toISOString() ?? null,
       customerPriceCents: mission.customerPriceCents,
       scoutPayoutCents: mission.scoutPayoutCents,
+      largeItem: mission.largeItem,
       locationSharingActive: mission.locationSharingActive,
       latitude,
       longitude,

@@ -5,6 +5,7 @@ import { ScoutDashboardShell } from "@/components/scout-dashboard-shell";
 import { getDb } from "@/db";
 import { missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
 export const metadata = { title: "Mission Board | Send a Scout", robots: { index: false, follow: false } };
 
@@ -13,7 +14,7 @@ export default async function ScoutMissionsPage() {
   const db = getDb();
   const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
   const rows = await db.select().from(missions).where(or(eq(missions.status, "open"), eq(missions.scoutId, user.id))).orderBy(desc(missions.createdAt));
-  const eligible = rows.filter((mission) => mission.scoutId === user.id || (profile?.status === "approved" && (mission.type === "see" ? profile.canSee : mission.type === "move" ? profile.canMove : profile.canMeet)));
+  const eligible = rows.filter((mission) => mission.scoutId === user.id || (profile?.status === "approved" && isMissionEligibleForScout(mission, profile)));
   const active = eligible.filter((mission) => mission.scoutId === user.id && !["completed", "cancelled", "disputed"].includes(mission.status));
   const open = eligible.filter((mission) => mission.status === "open" && !mission.scoutId);
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Scout";

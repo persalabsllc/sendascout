@@ -6,6 +6,7 @@ import { getDb } from "@/db";
 import { missionMessages, missions, missionUpdates, notifications, scoutProfiles } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
 import { alertEligibleScouts } from "@/lib/notifications";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
 type MissionStatus = typeof missions.$inferSelect.status;
 type Result = { ok: true } | { ok: false; error: string };
@@ -33,6 +34,10 @@ export async function claimMission(id: string): Promise<Result> {
     const db = getDb();
     const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
     if (!profile || profile.status !== "approved") throw new Error("Your Scout account must be approved before claiming missions.");
+    const mission = await getMission(id);
+    if (!isMissionEligibleForScout(mission, profile)) {
+      throw new Error("This mission is outside your selected service area or mission preferences.");
+    }
     const [claimed] = await db.update(missions).set({
       scoutId: user.id,
       status: "claimed",
@@ -41,9 +46,9 @@ export async function claimMission(id: string): Promise<Result> {
     }).where(and(eq(missions.id, id), eq(missions.status, "open"), isNull(missions.scoutId))).returning({ id: missions.id });
     if (!claimed) throw new Error("Another Scout claimed this mission first.");
     await db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "claimed", message: "A Scout claimed this mission." });
-    const mission = await getMission(id);
+    const claimedMission = await getMission(id);
     await db.insert(notifications).values({
-      recipientUserId: mission.customerId,
+      recipientUserId: claimedMission.customerId,
       missionId: id,
       channel: "in_app",
       status: "sent",

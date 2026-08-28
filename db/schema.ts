@@ -101,6 +101,7 @@ export const missions = pgTable("missions", {
   dropoffState: text("dropoff_state"),
   dropoffZip: text("dropoff_zip"),
   deliveryInstructions: text("delivery_instructions"),
+  largeItem: boolean("large_item").notNull().default(false),
   scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
   customerPriceCents: integer("customer_price_cents").notNull(),
   scoutPayoutCents: integer("scout_payout_cents").notNull(),

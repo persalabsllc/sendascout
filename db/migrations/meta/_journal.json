@@ -36,6 +36,13 @@
       "when": 1787942021682,
       "tag": "0004_marketplace_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787955533147,
+      "tag": "0005_workable_komodo",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { missions, notifications, scoutProfiles, users } from "@/db/schema";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
 type MissionKind = "see" | "move" | "meet";
 
@@ -46,11 +47,21 @@ export async function alertEligibleScouts(missionId: string) {
     : mission.type === "move"
       ? eq(scoutProfiles.canMove, true)
       : eq(scoutProfiles.canMeet, true);
-  const scouts = await db
-    .select({ userId: users.id, phone: users.phone })
+  const scoutRows = await db
+    .select({
+      userId: users.id,
+      phone: users.phone,
+      homeZip: scoutProfiles.homeZip,
+      serviceRadiusMiles: scoutProfiles.serviceRadiusMiles,
+      vehicleType: scoutProfiles.vehicleType,
+      canSee: scoutProfiles.canSee,
+      canMove: scoutProfiles.canMove,
+      canMeet: scoutProfiles.canMeet,
+    })
     .from(scoutProfiles)
     .innerJoin(users, eq(users.id, scoutProfiles.userId))
     .where(and(eq(scoutProfiles.status, "approved"), eq(users.status, "active"), capability));
+  const scouts = scoutRows.filter((scout) => isMissionEligibleForScout(mission, scout));
 
   const title = `New ${missionLabel(mission.type)} mission`;
   const body = `${mission.city}, ${mission.state} · Scout payout $${(mission.scoutPayoutCents / 100).toFixed(0)}. Review: https://sendascout.com/dashboard/missions/${mission.id}`;

@@ -4,6 +4,7 @@ import { Dashboard, type DashboardMission, type DashboardNotification } from "@/
 import { getDb } from "@/db";
 import { missions, notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
 export const metadata = { title: "Scout Dashboard | Send a Scout", robots: { index: false, follow: false } };
 
@@ -18,7 +19,7 @@ export default async function ScoutDashboard() {
       : db.select().from(missions).where(eq(missions.scoutId, user.id)).orderBy(desc(missions.createdAt)),
     db.select().from(notifications).where(and(eq(notifications.recipientUserId, user.id), eq(notifications.channel, "in_app"), isNull(notifications.readAt))).orderBy(desc(notifications.createdAt)).limit(5),
   ]);
-  const eligibleRows = rows.filter((mission) => mission.scoutId === user.id || (mission.type === "see" ? profile.canSee : mission.type === "move" ? profile.canMove : profile.canMeet));
+  const eligibleRows = rows.filter((mission) => mission.scoutId === user.id || isMissionEligibleForScout(mission, profile));
   const dashboardMissions: DashboardMission[] = eligibleRows.map((mission) => ({
     id: mission.id, type: mission.type, title: mission.title,
     place: `${mission.city}, ${mission.state} ${mission.zip}`,

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { missions, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { calculateMissionPrice, type MissionPriceQuote } from "@/lib/mission-pricing";
 
 export type MissionInput = {
   type: "see" | "move" | "meet";
@@ -25,6 +26,7 @@ export type MissionInput = {
   dropoffState: string;
   dropoffZip: string;
   deliveryInstructions: string;
+  largeItem: boolean;
   scheduledFor: string;
   title: string;
   instructions: string;
@@ -47,14 +49,12 @@ export type ScoutInput = {
 
 export type OnboardingResult = { ok: true; id: string } | { ok: false; error: string };
 
-const pricing = {
-  see: { customer: 3900, scout: 2400 },
-  move: { customer: 4900, scout: 3000 },
-  meet: { customer: 4900, scout: 3000 },
-} as const;
-
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
+}
+
+export async function getMissionPriceQuote(input: Pick<MissionInput, "type" | "pickupZip" | "dropoffZip" | "largeItem">): Promise<MissionPriceQuote> {
+  return calculateMissionPrice(input.type, input.pickupZip, input.dropoffZip, input.largeItem);
 }
 
 export async function createMission(input: MissionInput): Promise<OnboardingResult> {
@@ -83,7 +83,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     required(input.phone, "Phone number");
 
     const user = await requireAppUser("customer");
-    const amount = pricing[input.type];
+    const amount = calculateMissionPrice(input.type, input.pickupZip, input.dropoffZip, input.largeItem);
     const db = getDb();
 
     await db.update(users).set({ phone: input.phone.trim(), updatedAt: new Date() }).where(eq(users.id, user.id));
@@ -108,10 +108,11 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         dropoffState: input.type === "move" ? input.dropoffState.trim().toUpperCase() : null,
         dropoffZip: input.type === "move" ? input.dropoffZip.trim() : null,
         deliveryInstructions: input.type === "move" ? input.deliveryInstructions.trim() || null : null,
+        largeItem: input.type === "move" && input.largeItem,
         scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
-        customerPriceCents: amount.customer,
-        scoutPayoutCents: amount.scout,
-        platformFeeCents: amount.customer - amount.scout,
+        customerPriceCents: amount.customerPriceCents,
+        scoutPayoutCents: amount.scoutPayoutCents,
+        platformFeeCents: amount.platformFeeCents,
       })
       .returning({ id: missions.id });
 
