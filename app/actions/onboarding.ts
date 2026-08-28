@@ -50,7 +50,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     required(input.title, "Mission title");
     required(input.instructions, "Instructions");
     required(input.phone, "Phone number");
-    if (!/^\\d{5}(?:-\\d{4})?$/.test(input.zip.trim())) throw new Error("Enter a valid ZIP code.");
+    if (!/^\d{5}(?:-\d{4})?$/.test(input.zip.trim())) throw new Error("Enter a valid ZIP code.");
 
     const user = await requireAppUser("customer");
     const amount = pricing[input.type];
@@ -90,7 +90,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
     required(input.vehicleType, "Vehicle access");
     if (!input.consent) throw new Error("You must agree to verification before joining.");
     if (!input.canSee && !input.canMove && !input.canMeet) throw new Error("Select at least one mission type.");
-    if (!/^\\d{5}(?:-\\d{4})?$/.test(input.homeZip.trim())) throw new Error("Enter a valid ZIP code.");
+    if (!/^\d{5}(?:-\d{4})?$/.test(input.homeZip.trim())) throw new Error("Enter a valid ZIP code.");
 
     const user = await requireAppUser("scout");
     const db = getDb();
