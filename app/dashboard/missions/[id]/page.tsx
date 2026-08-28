@@ -16,9 +16,9 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
 
   let role: "customer" | "scout" | "admin";
   let canClaim = false;
-  if (user.role === "admin") role = "admin";
-  else if (mission.customerId === user.id) role = "customer";
+  if (mission.customerId === user.id) role = "customer";
   else if (mission.scoutId === user.id) role = "scout";
+  else if (user.role === "admin") role = "admin";
   else if (user.role === "scout" && mission.status === "open" && !mission.scoutId) {
     const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
     if (!profile || profile.status !== "approved") notFound();
