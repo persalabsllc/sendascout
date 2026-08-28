@@ -23,7 +23,7 @@ export function ControlRoom({ stats, scouts, missions }: { stats: { users: numbe
     });
   }
   return <main className="control-page">
-    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/">Public site</Link></div></header>
+    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/dashboard/customer">Customer dashboard</Link><Link href="/">Public site</Link></div></header>
     <div className="control-shell">
       <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Approve Scouts, release missions and oversee every active job.</p></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}
