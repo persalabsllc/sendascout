@@ -18,6 +18,7 @@ export type DashboardMission = {
   status: string;
   time: string;
   payoutCents?: number;
+  assigned?: boolean;
 };
 
 export type DashboardNotification = {
@@ -44,6 +45,10 @@ export function Dashboard({
   profileStatus?: string;
 }) {
   const scout = role === "scout";
+  const scoutMission = scout
+    ? missions.find((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status))
+      ?? missions.find((mission) => mission.status === "open")
+    : undefined;
   return (
     <main className="dashboard-page">
       <aside className="dash-sidebar">
@@ -68,7 +73,9 @@ export function Dashboard({
         <div className="dash-content">
           <div className="dash-welcome">
             <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{userName ? `Welcome, ${userName}.` : "Welcome!"}</h1><p>{scout ? "Your application and nearby mission opportunities live here." : "Create a mission or follow along with one already underway."}</p></div>
-            <Link className="button" href={scout ? "#missions" : "/request"}>{scout ? "Browse missions" : "New mission"} {scout ? <IconArrowRight size={19} /> : <IconPlus size={19} />}</Link>
+            {scout
+              ? scoutMission && <Link className="button" href={`/dashboard/missions/${scoutMission.id}`}>{scoutMission.assigned ? "Continue mission" : "Review next mission"} <IconArrowRight size={19} /></Link>
+              : <Link className="button" href="/request">New mission <IconPlus size={19} /></Link>}
           </div>
           {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div>{notifications[0].missionId && <Link href={`/dashboard/missions/${notifications[0].missionId}`}>Open <IconArrowRight size={17} /></Link>}</section>}
           {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} /> : <CustomerOverview missions={missions} />}
@@ -99,19 +106,23 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
 }
 
 function ScoutOverview({ missions, profileStatus }: { missions: DashboardMission[]; profileStatus: string }) {
-  const payout = missions.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
+  const available = missions.filter((mission) => mission.status === "open" && !mission.assigned);
+  const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
+  const completed = missions.filter((mission) => mission.assigned && mission.status === "completed");
+  const missionBoard = [...active, ...available];
+  const payout = available.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
     <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>Founding Scout application</strong><p>Your application is saved. Identity and background verification will open before launch.</p></div><span className="status">{statusLabel(profileStatus)}</span></div>
     <div className="stat-grid scout-stats">
-      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(missions.length)} note="Open launch-area missions" />
+      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open launch-area missions" />
       <Stat icon={IconCoin} label="Available earnings" value={money(payout)} note="Across open missions" />
-      <Stat icon={IconRoute} label="Completed" value="0" note="Ready for your first" />
+      <Stat icon={IconRoute} label="Completed" value={String(completed.length)} note={completed.length ? "Your completed missions" : "Ready for your first"} />
     </div>
     <section className="dash-section" id="missions">
       <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities near your launch area.</p></div></div>
-      {missions.length ? <div className="mission-list scout-list">{missions.map((mission) => {
+      {missionBoard.length ? <div className="mission-list scout-list">{missionBoard.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.status === "open" ? "Review" : "Open"}</span></Link>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
       })}</div> : <EmptyMissions />}
     </section>
   </>;
