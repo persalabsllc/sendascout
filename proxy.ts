@@ -1,7 +1,9 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 
 export default clerkMiddleware({
-  frontendApiProxy: { enabled: true },
+  frontendApiProxy: {
+    enabled: (url) => !["sendascout.com", "www.sendascout.com"].includes(url.hostname),
+  },
 });
 
 export const config = {
