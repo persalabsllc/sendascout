@@ -55,12 +55,12 @@ export function Dashboard({
         <Brand />
         <nav>
           <Link className="active" href={scout ? "/dashboard/scout" : "/dashboard/customer"}><IconDashboard size={20} /> Overview</Link>
-          <Link href="#missions"><IconTargetArrow size={20} /> {scout ? "Mission board" : "My missions"}</Link>
-          <Link href="#payments"><IconWallet size={20} /> {scout ? "Earnings" : "Payments"}</Link>
-          <Link href={scout ? "/scout" : "/dashboard/customer/profile"}><IconUser size={20} /> Profile</Link>
+          <Link href={scout ? "/dashboard/scout/missions" : "/dashboard/customer"}><IconTargetArrow size={20} /> {scout ? "Mission board" : "My missions"}</Link>
+          <Link href={scout ? "/dashboard/scout/earnings" : "/dashboard/customer/payments"}><IconWallet size={20} /> {scout ? "Earnings" : "Payments"}</Link>
+          <Link href={scout ? "/dashboard/scout/settings" : "/dashboard/customer/profile"}><IconUser size={20} /> Profile</Link>
         </nav>
         <div className="dash-sidebar-bottom">
-          <Link href="#settings"><IconSettings size={19} /> Settings</Link>
+          <Link href={scout ? "/dashboard/scout/settings" : "/dashboard/customer/profile"}><IconSettings size={19} /> Settings</Link>
           <div className="dash-user"><span>{initials}</span><div><strong>{userName || "Your account"}</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
         </div>
       </aside>
@@ -110,12 +110,12 @@ function ScoutOverview({ missions, profileStatus }: { missions: DashboardMission
   const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
   const completed = missions.filter((mission) => mission.assigned && mission.status === "completed");
   const missionBoard = [...active, ...available];
-  const payout = available.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
+  const earned = completed.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
     <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>Founding Scout application</strong><p>Your application is saved. Identity and background verification will open before launch.</p></div><span className="status">{statusLabel(profileStatus)}</span></div>
     <div className="stat-grid scout-stats">
       <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open launch-area missions" />
-      <Stat icon={IconCoin} label="Available earnings" value={money(payout)} note="Across open missions" />
+      <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />
       <Stat icon={IconRoute} label="Completed" value={String(completed.length)} note={completed.length ? "Your completed missions" : "Ready for your first"} />
     </div>
     <section className="dash-section" id="missions">

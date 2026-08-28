@@ -4,7 +4,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { users } from "@/db/schema";
+import { scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export type CustomerProfileInput = {
@@ -19,9 +19,35 @@ export type CustomerProfileInput = {
 };
 
 export type ProfileResult = { ok: true } | { ok: false; error: string };
+export type ScoutSettingsInput = { homeZip: string; serviceRadiusMiles: number; vehicleType: string; canSee: boolean; canMove: boolean; canMeet: boolean };
 
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
+}
+
+export async function saveScoutSettings(input: ScoutSettingsInput): Promise<ProfileResult> {
+  try {
+    if (!/^\d{5}$/.test(input.homeZip.trim())) throw new Error("Enter a valid 5-digit home ZIP code.");
+    if (![10, 25, 50, 75].includes(input.serviceRadiusMiles)) throw new Error("Choose a valid travel radius.");
+    required(input.vehicleType, "Vehicle type");
+    if (!input.canSee && !input.canMove && !input.canMeet) throw new Error("Choose at least one mission type.");
+    const user = await requireAppUser("scout");
+    await getDb().update(scoutProfiles).set({
+      homeZip: input.homeZip.trim(),
+      serviceRadiusMiles: input.serviceRadiusMiles,
+      vehicleType: input.vehicleType.trim(),
+      canSee: input.canSee,
+      canMove: input.canMove,
+      canMeet: input.canMeet,
+      updatedAt: new Date(),
+    }).where(eq(scoutProfiles.userId, user.id));
+    revalidatePath("/dashboard/scout");
+    revalidatePath("/dashboard/scout/missions");
+    revalidatePath("/dashboard/scout/settings");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "We could not save your Scout settings." };
+  }
 }
 
 export async function saveCustomerProfile(input: CustomerProfileInput): Promise<ProfileResult> {

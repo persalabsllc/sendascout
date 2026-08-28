@@ -13,6 +13,7 @@
     "@clerk/nextjs": "^7.0.1",
     "@neondatabase/serverless": "^1.0.2",
     "@tabler/icons-react": "^3.34.1",
+    "@vercel/blob": "^2.8.0",
     "drizzle-orm": "^0.44.7",
     "next": "^16.1.6",
     "react": "^19.2.4",

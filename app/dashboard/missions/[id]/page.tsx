@@ -1,8 +1,8 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, or, isNotNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
-import { missionMessages, missions, scoutProfiles, users } from "@/db/schema";
+import { missionMessages, missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export const metadata = { title: "Mission | Send a Scout", robots: { index: false, follow: false } };
@@ -26,13 +26,17 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     canClaim = true;
   } else notFound();
 
-  const [[customer], scoutRows, messageRows] = await Promise.all([
+  const [[customer], scoutRows, messageRows, resultRows] = await Promise.all([
     db.select().from(users).where(eq(users.id, mission.customerId)).limit(1),
     mission.scoutId ? db.select().from(users).where(eq(users.id, mission.scoutId)).limit(1) : Promise.resolve([]),
     mission.scoutId || role === "admin"
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
           .from(missionMessages).where(eq(missionMessages.missionId, mission.id)).orderBy(asc(missionMessages.createdAt))
       : Promise.resolve([]),
+    db.select({ id: missionUpdates.id, message: missionUpdates.message, mediaUrl: missionUpdates.mediaUrl, createdAt: missionUpdates.createdAt })
+      .from(missionUpdates)
+      .where(and(eq(missionUpdates.missionId, mission.id), or(eq(missionUpdates.status, "submitted"), isNotNull(missionUpdates.mediaUrl))))
+      .orderBy(asc(missionUpdates.createdAt)),
   ]);
   const scout = scoutRows[0];
   const showFullAddress = role !== "scout" || mission.scoutId === user.id;
@@ -75,6 +79,11 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       sender: message.senderId === mission.customerId ? (role === "customer" ? "You" : customer?.firstName || "Customer") : message.senderId === mission.scoutId ? (role === "scout" ? "You" : scout?.firstName || "Your Scout") : "Send a Scout support",
       createdAt: message.createdAt.toISOString(),
     }))}
+    results={{
+      summary: resultRows.find((item) => item.message)?.message ?? null,
+      mediaUrls: resultRows.flatMap((item) => item.mediaUrl ? [item.mediaUrl] : []),
+      submittedAt: resultRows[0]?.createdAt.toISOString() ?? null,
+    }}
   />;
 }
 

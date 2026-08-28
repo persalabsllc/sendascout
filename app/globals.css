@@ -348,6 +348,12 @@ button, input, textarea, select { font: inherit; }
 .notification-strip strong { color: var(--navy); font-size: 12px; }
 .notification-strip p { margin: 2px 0 0; color: #7d8b91; font-size: 10px; }
 .notification-strip > a { color: var(--coral); font-size: 11px; font-weight: 850; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.simple-title { align-items: flex-start; }
+.settings-section { overflow: visible; }
+.settings-form { padding: 24px; display: grid; gap: 17px; }
+.settings-form .field { margin: 0; }
+.settings-form .button { justify-self: start; }
+.form-success { color: #008c79; background: #e3f8f4; border-radius: 10px; padding: 11px 13px; font-size: 11px; margin: 0; }
 
 /* Mission workspace */
 .mission-page { min-height: 100vh; background: #f5f7f6; padding: 34px 20px 70px; }
@@ -400,6 +406,22 @@ button, input, textarea, select { font: inherit; }
 .message-compose textarea { border: 1px solid #dce4e4; border-radius: 11px; padding: 10px 11px; resize: none; font: inherit; color: var(--navy); font-size: 10px; }
 .message-compose button { border: 0; border-radius: 11px; background: var(--coral); color: white; display: grid; place-items: center; cursor: pointer; }
 .message-compose button:disabled { opacity: .45; cursor: not-allowed; }
+.result-form-panel .panel-heading, .result-panel .panel-heading { margin-bottom: 14px; }
+.result-notes { display: grid; gap: 7px; margin-bottom: 14px; }
+.result-notes span { color: var(--navy); font-size: 10px; font-weight: 850; }
+.result-notes textarea { border: 1px solid #d7e1e1; border-radius: 12px; padding: 12px; resize: vertical; font: inherit; color: var(--navy); font-size: 11px; line-height: 1.55; }
+.result-upload { position: relative; border: 1px dashed #adc9c7; background: #f4fbfa; border-radius: 13px; padding: 15px; display: flex; align-items: center; gap: 11px; color: var(--teal); cursor: pointer; }
+.result-upload input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.result-upload span { display: flex; flex-direction: column; gap: 2px; }
+.result-upload strong { color: var(--navy); font-size: 11px; }
+.result-upload small { color: #7d8f95; font-size: 8px; }
+.selected-files { display: flex; flex-wrap: wrap; gap: 7px; margin: 11px 0; }
+.selected-files > span { background: #eef3f2; border-radius: 8px; padding: 7px 9px; color: var(--navy); font-size: 8px; display: flex; gap: 6px; }
+.selected-files small { color: #86959a; }
+.result-form-panel > .button { margin-top: 14px; font-size: 11px; }
+.result-summary { color: #53676f; line-height: 1.7; font-size: 11px; white-space: pre-wrap; margin: 0 0 15px; }
+.result-gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.result-gallery img, .result-gallery video { display: block; width: 100%; height: 190px; object-fit: cover; border-radius: 12px; background: #eef3f2; }
 
 /* Control Room */
 .control-page { min-height: 100vh; background: #f5f7f6; }

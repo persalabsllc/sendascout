@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { upload } from "@vercel/blob/client";
 import {
-  IconArrowLeft, IconCheck, IconClock, IconMapPin, IconMessageCircle,
-  IconNavigation, IconRoute, IconSend, IconShieldCheck,
+  IconArrowLeft, IconCheck, IconClock, IconFileUpload, IconMapPin, IconMessageCircle,
+  IconNavigation, IconPhoto, IconRoute, IconSend, IconShieldCheck,
 } from "@tabler/icons-react";
 import {
   claimMission, confirmMissionComplete, sendMissionMessage, setLocationSharing,
-  updateMissionLocation, updateMissionStatus,
+  submitMissionResults, updateMissionLocation, updateMissionStatus,
 } from "@/app/actions/missions";
 
 type Status = "draft" | "open" | "claimed" | "en_route" | "onsite" | "en_route_pickup" | "at_pickup" | "en_route_dropoff" | "at_dropoff" | "submitted" | "completed" | "cancelled" | "disputed";
@@ -34,12 +35,15 @@ type MissionView = {
   scoutName?: string | null;
 };
 type MessageView = { id: string; body: string; sender: string; mine: boolean; createdAt: string };
+type ResultView = { summary: string | null; mediaUrls: string[]; submittedAt: string | null };
 
-export function MissionWorkspace({ role, mission, messages, canClaim }: { role: "customer" | "scout" | "admin"; mission: MissionView; messages: MessageView[]; canClaim: boolean }) {
+export function MissionWorkspace({ role, mission, messages, results, canClaim }: { role: "customer" | "scout" | "admin"; mission: MissionView; messages: MessageView[]; results: ResultView; canClaim: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [resultSummary, setResultSummary] = useState("");
+  const [resultFiles, setResultFiles] = useState<File[]>([]);
   const [tracking, setTracking] = useState(mission.locationSharingActive);
   const lastLocationSent = useRef(0);
   const assigned = Boolean(mission.scoutName);
@@ -108,6 +112,34 @@ export function MissionWorkspace({ role, mission, messages, canClaim }: { role: 
     });
   }
 
+  function submitResults() {
+    setError("");
+    startTransition(async () => {
+      try {
+        if (!resultSummary.trim() && resultFiles.length === 0) {
+          setError("Add a written result, photo, or video before submitting.");
+          return;
+        }
+        const mediaUrls: string[] = [];
+        for (const file of resultFiles) {
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+          const blob = await upload(`mission-results/${mission.id}/${safeName}`, file, {
+            access: "public",
+            handleUploadUrl: "/api/mission-results/upload",
+            clientPayload: JSON.stringify({ missionId: mission.id }),
+            multipart: file.size > 5 * 1024 * 1024,
+          });
+          mediaUrls.push(blob.url);
+        }
+        const result = await submitMissionResults(mission.id, resultSummary, mediaUrls);
+        if (!result.ok) setError(result.error);
+        else router.refresh();
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : "The result files could not be uploaded.");
+      }
+    });
+  }
+
   const next = nextStatus(mission.type, mission.status);
   const mapUrl = mission.latitude != null && mission.longitude != null ? approximateMapUrl(mission.latitude, mission.longitude) : null;
   return (
@@ -138,6 +170,16 @@ export function MissionWorkspace({ role, mission, messages, canClaim }: { role: 
               <button className={`tracking-button ${tracking ? "tracking-on" : ""}`} disabled={pending} onClick={toggleTracking}><IconNavigation size={18} /> {tracking ? "Stop location sharing" : "Start live location sharing"}</button>
               <small>Location is shared only during this active mission and is removed when sharing stops.</small>
             </article>}
+
+            {role === "scout" && assigned && readyForResults(mission) && <article className="mission-panel result-form-panel">
+              <div className="panel-heading"><IconFileUpload size={22} /><div><h2>{mission.type === "see" ? "Submit what you found" : mission.type === "move" ? "Submit delivery proof" : "Submit appointment results"}</h2><p>These notes and files go directly to the paying customer.</p></div></div>
+              <label className="result-notes"><span>Result notes</span><textarea rows={6} maxLength={5000} placeholder={mission.type === "see" ? "Describe the condition, answer the customer’s questions, and call out anything important…" : "Describe what happened and any details the customer should know…"} value={resultSummary} onChange={(event) => setResultSummary(event.target.value)} /></label>
+              <label className="result-upload"><IconPhoto size={23} /><span><strong>Add photos or video</strong><small>Up to 12 files · JPG, PNG, WEBP, HEIC, MP4, MOV or WEBM</small></span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/quicktime,video/webm" multiple onChange={(event) => setResultFiles(Array.from(event.target.files ?? []).slice(0, 12))} /></label>
+              {resultFiles.length > 0 && <div className="selected-files">{resultFiles.map((file) => <span key={`${file.name}-${file.size}`}>{file.name}<small>{formatBytes(file.size)}</small></span>)}</div>}
+              <button className="button" disabled={pending} onClick={submitResults}>{pending ? "Uploading and submitting…" : "Submit results to customer"}</button>
+            </article>}
+
+            {(results.summary || results.mediaUrls.length > 0) && <ResultPanel results={results} />}
 
             {role === "customer" && mission.status === "submitted" && <article className="mission-panel completion-panel"><IconCheck size={28} /><div><h2>Scout marked this mission complete</h2><p>Review the result, then confirm completion.</p></div><button className="button" disabled={pending} onClick={() => run(() => confirmMissionComplete(mission.id))}>Confirm completion</button></article>}
           </section>
@@ -176,16 +218,18 @@ function nextStatus(type: MissionView["type"], status: Status): { status: Status
       en_route_pickup: { status: "at_pickup", label: "I’ve arrived at pickup" },
       at_pickup: { status: "en_route_dropoff", label: "Item picked up — start delivery" },
       en_route_dropoff: { status: "at_dropoff", label: "I’ve arrived at drop-off" },
-      at_dropoff: { status: "submitted", label: "Mark delivery complete" },
     };
     return steps[status] ?? null;
   }
   const steps: Partial<Record<Status, { status: Status; label: string }>> = {
     claimed: { status: "en_route", label: "Start trip to location" },
     en_route: { status: "onsite", label: "I’ve arrived at location" },
-    onsite: { status: "submitted", label: type === "see" ? "Submit inspection results" : "Mark appointment complete" },
   };
   return steps[status] ?? null;
+}
+
+function ResultPanel({ results }: { results: ResultView }) {
+  return <article className="mission-panel result-panel"><div className="panel-heading"><IconCheck size={22} /><div><h2>Mission results</h2><p>{results.submittedAt ? `Submitted ${new Date(results.submittedAt).toLocaleString()}` : "Submitted by the Scout"}</p></div></div>{results.summary && <p className="result-summary">{results.summary}</p>}{results.mediaUrls.length > 0 && <div className="result-gallery">{results.mediaUrls.map((url) => isVideo(url) ? <video controls preload="metadata" src={url} key={url} /> : <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="Scout mission result" /></a>)}</div>}</article>;
 }
 
 function statusLabel(type: MissionView["type"], status: Status) {
@@ -203,3 +247,6 @@ function approximateMapUrl(latitude: number, longitude: number) {
   const delta = 0.012;
   return `https://www.openstreetmap.org/export/embed.html?bbox=${lng - delta}%2C${lat - delta}%2C${lng + delta}%2C${lat + delta}&layer=mapnik&marker=${lat}%2C${lng}`;
 }
+function readyForResults(mission: MissionView) { return mission.type === "move" ? mission.status === "at_dropoff" : mission.status === "onsite"; }
+function isVideo(url: string) { return /\.(mp4|mov|webm)(?:\?|$)/i.test(url); }
+function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }

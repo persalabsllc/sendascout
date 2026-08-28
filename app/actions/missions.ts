@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
 import { missionMessages, missions, missionUpdates, notifications, scoutProfiles } from "@/db/schema";
@@ -70,12 +70,10 @@ export async function updateMissionStatus(id: string, nextStatus: MissionStatus)
           en_route_pickup: ["at_pickup"],
           at_pickup: ["en_route_dropoff"],
           en_route_dropoff: ["at_dropoff"],
-          at_dropoff: ["submitted"],
         }
       : {
           claimed: ["en_route"],
           en_route: ["onsite"],
-          onsite: ["submitted"],
         };
     if (!transitions[mission.status]?.includes(nextStatus)) throw new Error("That status change is not available yet.");
 
@@ -104,6 +102,62 @@ export async function updateMissionStatus(id: string, nextStatus: MissionStatus)
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to update this mission." };
+  }
+}
+
+export async function submitMissionResults(id: string, summary: string, mediaUrls: string[]): Promise<Result> {
+  try {
+    const user = await requireAppUser("scout");
+    const mission = await getMission(id);
+    if (mission.scoutId !== user.id) throw new Error("Only the assigned Scout can submit results.");
+    const ready = mission.type === "move" ? mission.status === "at_dropoff" : mission.status === "onsite";
+    if (!ready) throw new Error("Finish the mission steps before submitting results.");
+
+    const cleanSummary = summary.trim();
+    const cleanUrls = [...new Set(mediaUrls.map((url) => url.trim()).filter((url) => /^https:\/\//.test(url)))].slice(0, 12);
+    if (!cleanSummary && cleanUrls.length === 0) throw new Error("Add a written result, photo, or video before submitting.");
+    if (cleanSummary.length > 5000) throw new Error("Result notes are limited to 5,000 characters.");
+
+    const db = getDb();
+    await db.transaction(async (tx) => {
+      await tx.insert(missionUpdates).values({
+        missionId: id,
+        authorId: user.id,
+        status: "submitted",
+        message: cleanSummary || "Scout submitted mission media.",
+      });
+      if (cleanUrls.length) {
+        await tx.insert(missionUpdates).values(cleanUrls.map((mediaUrl) => ({
+          missionId: id,
+          authorId: user.id,
+          status: "submitted" as const,
+          mediaUrl,
+        })));
+      }
+      await tx.update(missions).set({
+        status: "submitted",
+        locationSharingActive: false,
+        scoutLatitude: null,
+        scoutLongitude: null,
+        scoutLocationAccuracyMeters: null,
+        scoutLocationUpdatedAt: null,
+        updatedAt: new Date(),
+      }).where(eq(missions.id, id));
+      await tx.insert(notifications).values({
+        recipientUserId: mission.customerId,
+        missionId: id,
+        channel: "in_app",
+        status: "sent",
+        kind: "results_submitted",
+        title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready",
+        body: "Your Scout submitted notes and media for your review.",
+        sentAt: new Date(),
+      });
+    });
+    refreshMission(id);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Unable to submit mission results." };
   }
 }
 
@@ -180,8 +234,17 @@ export async function confirmMissionComplete(id: string): Promise<Result> {
     const user = await requireAppUser("customer");
     const mission = await getMission(id);
     if (mission.customerId !== user.id || mission.status !== "submitted") throw new Error("This mission is not ready for confirmation.");
-    await getDb().update(missions).set({ status: "completed", completedAt: new Date(), locationSharingActive: false, scoutLatitude: null, scoutLongitude: null, scoutLocationAccuracyMeters: null, scoutLocationUpdatedAt: null, updatedAt: new Date() }).where(eq(missions.id, id));
-    await getDb().insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "completed", message: "Customer confirmed completion." });
+    const db = getDb();
+    await db.transaction(async (tx) => {
+      await tx.update(missions).set({ status: "completed", completedAt: new Date(), locationSharingActive: false, scoutLatitude: null, scoutLongitude: null, scoutLocationAccuracyMeters: null, scoutLocationUpdatedAt: null, updatedAt: new Date() }).where(eq(missions.id, id));
+      await tx.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "completed", message: "Customer confirmed completion." });
+      if (mission.scoutId) {
+        await tx.update(scoutProfiles).set({
+          completedMissions: sql`${scoutProfiles.completedMissions} + 1`,
+          updatedAt: new Date(),
+        }).where(eq(scoutProfiles.userId, mission.scoutId));
+      }
+    });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
