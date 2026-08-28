@@ -1,0 +1,1 @@
+ALTER TABLE "missions" ADD COLUMN "route_polyline" text;

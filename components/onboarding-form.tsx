@@ -75,9 +75,9 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
       <header className="onboarding-header"><Brand /><span className="secure"><IconLock size={15} /> Secure onboarding</span></header>
       <section className="success-card">
         <span className="success-icon"><IconCircleCheck size={48} /></span>
-        <span className="kicker">{customer ? "Mission saved" : "Application received"}</span>
-        <h1>{customer ? "Your mission is in your dashboard." : "Welcome to the Scout network."}</h1>
-        <p>{customer ? "The mission is saved as a draft. Payments and live Scout matching will activate during the Eastern North Carolina soft launch." : "Your founding Scout profile is saved. We’ll contact you before the Eastern North Carolina soft launch."}</p>
+        <span className="kicker">{customer ? "Mission published" : "Application received"}</span>
+        <h1>{customer ? "Your mission is live for eligible Scouts." : "Welcome to the Scout network."}</h1>
+        <p>{customer ? "Matching Scouts in the selected service area can review and claim it now. You’ll receive an alert when a Scout accepts." : "Your founding Scout profile is saved. We’ll contact you before the Eastern North Carolina soft launch."}</p>
         <Link className="button" href={customer ? "/dashboard/customer" : "/dashboard/scout"}>Open dashboard <IconArrowRight size={19} /></Link>
       </section>
     </main>
@@ -101,7 +101,7 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="form-actions">
             <button type="button" className="button button-ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0 || isPending}><IconArrowLeft size={19} /> Back</button>
-            <button className="button" type="submit" disabled={isPending}>{isPending ? "Saving…" : step === steps.length - 1 ? (customer ? "Save mission" : "Join the network") : "Continue"}<IconArrowRight size={19} /></button>
+            <button className="button" type="submit" disabled={isPending}>{isPending ? (customer ? "Publishing…" : "Saving…") : step === steps.length - 1 ? (customer ? "Publish mission" : "Join the network") : "Continue"}<IconArrowRight size={19} /></button>
           </div>
         </form>
       </section>
@@ -142,7 +142,7 @@ function MoveMissionStep({ step, value, set, quote }: { step: number; value: Mis
     <label className="field"><span>Item and handling details</span><textarea required rows={5} placeholder="Describe the item, approximate size, whether it is prepaid, fragile or requires special handling…" value={value.instructions} onChange={(event) => set("instructions", event.target.value)} /></label>
     <Field label="Best phone number" type="tel" placeholder="(252) 555-0123" value={value.phone} onChange={(event) => set("phone", event.target.value)} />
   </>;
-  return <div className="review-box move-review"><Review label="Mission" value="Move It" /><Review label="Item" value={value.title || "Item description"} /><Review label="Item class" value={value.largeItem ? "Larger item · SUV, van or pickup" : "Small item · car or trunk"} /><Review label="Pickup" value={`${value.pickupName || "Pickup"} · ${formatMovePlace(value.pickupAddress, value.pickupCity, value.pickupState, value.pickupZip)}`} /><Review label="Drop-off" value={`${value.dropoffName || "Drop-off"} · ${formatMovePlace(value.dropoffAddress, value.dropoffCity, value.dropoffState, value.dropoffZip)}`} /><Review label="Pickup time" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Service price" value={money(quote?.customerPriceCents ?? 1900)} />{quote?.estimatedRouteMiles !== null && quote?.estimatedRouteMiles !== undefined && <Review label={quote.routeSource === "google" ? "Verified driving route" : "Estimated route"} value={`${quote.estimatedRouteMiles} mile${quote.estimatedRouteMiles === 1 ? "" : "s"}`} />}<p>Includes the first 3 route miles. Additional miles are $1.75 each. Once Google route verification is connected, the road mileage and price are locked before a Scout accepts.</p><p>You won’t be charged yet.</p></div>;
+  return <div className="review-box move-review"><Review label="Mission" value="Move It" /><Review label="Item" value={value.title || "Item description"} /><Review label="Item class" value={value.largeItem ? "Larger item · SUV, van or pickup" : "Small item · car or trunk"} /><Review label="Pickup" value={`${value.pickupName || "Pickup"} · ${formatMovePlace(value.pickupAddress, value.pickupCity, value.pickupState, value.pickupZip)}`} /><Review label="Drop-off" value={`${value.dropoffName || "Drop-off"} · ${formatMovePlace(value.dropoffAddress, value.dropoffCity, value.dropoffState, value.dropoffZip)}`} /><Review label="Pickup time" value={value.scheduledFor ? new Date(value.scheduledFor).toLocaleString() : "As soon as possible"} /><Review label="Service price" value={money(quote?.customerPriceCents ?? 1900)} />{quote?.estimatedRouteMiles !== null && quote?.estimatedRouteMiles !== undefined && <Review label={quote.routeSource === "google" ? "Verified driving route" : "Estimated route"} value={`${quote.estimatedRouteMiles} mile${quote.estimatedRouteMiles === 1 ? "" : "s"}`} />}<p>Includes the first 3 route miles. Additional miles are $1.75 each. The verified road mileage and price are locked before a Scout accepts.</p><p>You won’t be charged yet.</p></div>;
 }
 
 function ScoutStep({ step, value, setValue, email }: { step: number; value: ScoutInput; setValue: React.Dispatch<React.SetStateAction<ScoutInput>>; email: string }) {

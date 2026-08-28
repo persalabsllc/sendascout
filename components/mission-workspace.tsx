@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { upload } from "@vercel/blob/client";
 import {
   IconArrowLeft, IconCheck, IconClock, IconFileUpload, IconMapPin, IconMessageCircle,
@@ -44,6 +45,7 @@ type MissionView = {
   latitude?: number | null;
   longitude?: number | null;
   locationUpdatedAt?: string | null;
+  directionsUrl?: string | null;
   customerName: string;
   scoutName?: string | null;
 };
@@ -163,7 +165,8 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
   }
 
   const next = nextStatus(mission.type, mission.status);
-  const mapUrl = mission.latitude != null && mission.longitude != null ? approximateMapUrl(mission.latitude, mission.longitude) : null;
+  const scoutLocationMapUrl = mission.latitude != null && mission.longitude != null ? approximateMapUrl(mission.latitude, mission.longitude) : null;
+  const missionMapUrl = `/api/mission-map?missionId=${encodeURIComponent(mission.id)}`;
   return (
     <main className="mission-page">
       <div className="mission-shell">
@@ -211,13 +214,17 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
           </section>
 
           <aside className="mission-column">
-            <article className="mission-panel tracking-panel">
+            {role === "scout" ? <article className="mission-panel tracking-panel mission-map-panel">
+              <div className="panel-heading"><IconRoute size={22} /><div><h2>{mission.type === "move" ? "Pickup-to-drop-off map" : mission.type === "meet" ? "Meeting location map" : "Inspection location map"}</h2><p>{mission.type === "move" ? "Plan the verified driving route" : "See where the mission takes place"}</p></div></div>
+              <Image className="mission-map-image" src={missionMapUrl} alt={mission.type === "move" ? "Pickup-to-drop-off driving route" : "Mission location"} width={900} height={480} sizes="(max-width: 760px) 100vw, 42vw" unoptimized />
+              <div className="map-footer"><small>{canClaim ? "Planning view · the exact address unlocks after claiming" : mission.type === "move" ? "Pickup and drop-off route" : "Mission location"}</small>{mission.directionsUrl && <a href={mission.directionsUrl} target="_blank" rel="noreferrer">Open in Google Maps <IconNavigation size={15} /></a>}</div>
+            </article> : <article className="mission-panel tracking-panel">
               <div className="panel-heading"><IconNavigation size={22} /><div><h2>Scout location</h2><p>{trackingCopy(mission)}</p></div></div>
-              {mission.locationSharingActive && mapUrl ? <>
-                <iframe title="Approximate Scout location" src={mapUrl} loading="lazy" />
+              {mission.locationSharingActive && scoutLocationMapUrl ? <>
+                <iframe title="Approximate Scout location" src={scoutLocationMapUrl} loading="lazy" />
                 <small>Approximate location · refreshed every 10 seconds · {mission.locationUpdatedAt ? `last update ${new Date(mission.locationUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "waiting for first update"}</small>
               </> : <div className="tracking-empty"><IconMapPin size={28} /><strong>Location is not currently being shared</strong><p>Status updates will still appear here.</p></div>}
-            </article>
+            </article>}
 
             <article className="mission-panel chat-panel">
               <div className="panel-heading"><IconMessageCircle size={22} /><div><h2>Mission chat</h2><p>Private communication inside Send a Scout</p></div></div>

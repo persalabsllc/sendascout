@@ -49,6 +49,12 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     : null;
   const latitude = mission.locationSharingActive && mission.scoutLatitude ? Math.round(Number(mission.scoutLatitude) * 1000) / 1000 : null;
   const longitude = mission.locationSharingActive && mission.scoutLongitude ? Math.round(Number(mission.scoutLongitude) * 1000) / 1000 : null;
+  const mapPrecision = role === "scout" && mission.scoutId !== user.id ? 3 : 6;
+  const mapCoordinate = (value: string | null) => value === null ? null : Number(Number(value).toFixed(mapPrecision));
+  const pickupMapLatitude = mapCoordinate(mission.pickupLatitude);
+  const pickupMapLongitude = mapCoordinate(mission.pickupLongitude);
+  const dropoffMapLatitude = mapCoordinate(mission.dropoffLatitude);
+  const dropoffMapLongitude = mapCoordinate(mission.dropoffLongitude);
 
   return <MissionWorkspace
     role={role}
@@ -83,6 +89,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       latitude,
       longitude,
       locationUpdatedAt: mission.scoutLocationUpdatedAt?.toISOString() ?? null,
+      directionsUrl: mapDirectionsUrl(mission.type, pickupMapLatitude, pickupMapLongitude, dropoffMapLatitude, dropoffMapLongitude),
       customerName: customer?.firstName || "Customer",
       scoutName: scout?.firstName || null,
     }}
@@ -107,4 +114,13 @@ function privateMediaUrl(missionId: string, pathname: string) {
 
 function formatLocation(name: string | null, line1: string, line2: string | null, city: string | null, state: string | null, zip: string | null) {
   return [name, line1, line2, [city, state, zip].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
+}
+
+function mapDirectionsUrl(type: "see" | "move" | "meet", pickupLatitude: number | null, pickupLongitude: number | null, dropoffLatitude: number | null, dropoffLongitude: number | null) {
+  if (pickupLatitude === null || pickupLongitude === null) return null;
+  const pickup = `${pickupLatitude},${pickupLongitude}`;
+  if (type === "move" && dropoffLatitude !== null && dropoffLongitude !== null) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(pickup)}&destination=${encodeURIComponent(`${dropoffLatitude},${dropoffLongitude}`)}&travelmode=driving`;
+  }
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pickup)}`;
 }

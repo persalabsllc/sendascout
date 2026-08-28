@@ -358,11 +358,12 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
   }
 }
 
-export async function adminSetMissionStatus(id: string, status: "open" | "cancelled" | "completed"): Promise<Result> {
+export async function adminSetMissionStatus(id: string, status: "draft" | "open" | "cancelled" | "completed"): Promise<Result> {
   try {
     const admin = await requireAdminUser();
     const mission = await getMission(id);
     if (status === "open" && mission.status !== "draft") throw new Error("Only draft missions can be opened.");
+    if (status === "draft" && (mission.status !== "open" || mission.scoutId)) throw new Error("Only unclaimed open missions can be pulled from Scouts.");
     const verifiedQuote = status === "open" ? await calculateMissionQuote({
       type: mission.type,
       address: mission.addressLine1,
@@ -398,6 +399,7 @@ export async function adminSetMissionStatus(id: string, status: "open" | "cancel
         dropoffLongitude: verifiedQuote.dropoffCoordinates?.longitude.toFixed(6) ?? null,
         routeDistanceMeters: verifiedQuote.routeDistanceMeters,
         routeDurationSeconds: verifiedQuote.routeDurationSeconds,
+        routePolyline: verifiedQuote.routePolyline,
         routeSource: verifiedQuote.routeSource,
         routeQuotedAt: verifiedQuote.routeSource === "google" ? new Date() : null,
       } : {}),
@@ -409,7 +411,8 @@ export async function adminSetMissionStatus(id: string, status: "open" | "cancel
       scoutLocationUpdatedAt: null,
       updatedAt: new Date(),
     }).where(eq(missions.id, id));
-    await getDb().insert(missionUpdates).values({ missionId: id, authorId: admin.id, status, message: `Control Room changed mission to ${status}.` });
+    await getDb().insert(missionUpdates).values({ missionId: id, authorId: admin.id, status, message: status === "draft" ? "Control Room pulled this mission from the Scout board." : `Control Room changed mission to ${status}.` });
+    if (status === "draft") await getDb().update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.missionId, id), eq(notifications.kind, "new_mission")));
     if (status === "open") await alertEligibleScouts(id);
     refreshMission(id);
     return { ok: true };

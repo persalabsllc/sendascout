@@ -390,7 +390,11 @@ button, input, textarea, select { font: inherit; }
 .tracking-button { border: 1px solid #cad7d8; border-radius: 10px; padding: 10px 13px; background: white; color: var(--navy); font-size: 10px; font-weight: 850; display: inline-flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
 .tracking-button.tracking-on { background: #e2f9f5; color: #008d78; border-color: #9ee5da; }
 .tracking-panel iframe { border: 0; width: 100%; height: 240px; border-radius: 13px; background: #eef3f2; }
+.mission-map-image { display: block; width: 100%; height: auto; max-height: 300px; object-fit: cover; border-radius: 13px; background: #eef3f2; }
 .tracking-panel > small { display: block; color: #8b989e; font-size: 8px; line-height: 1.5; margin-top: 8px; }
+.map-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
+.map-footer small { color: #8b989e; font-size: 9px; line-height: 1.45; }
+.map-footer a { display: inline-flex; align-items: center; gap: 5px; color: #087f78; font-size: 10px; font-weight: 800; white-space: nowrap; }
 .timer-panel { display: grid; gap: 14px; }
 .timer-panel .panel-heading { margin-bottom: 0; }
 .timer-display { background: var(--navy); border-radius: 15px; padding: 19px; display: grid; gap: 5px; text-align: center; }

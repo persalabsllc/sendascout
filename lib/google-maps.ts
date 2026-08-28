@@ -1,7 +1,7 @@
 import "server-only";
 
 export type Coordinates = { latitude: number; longitude: number };
-export type DrivingRoute = { distanceMeters: number; durationSeconds: number };
+export type DrivingRoute = { distanceMeters: number; durationSeconds: number; encodedPolyline: string };
 
 function apiKey() {
   return process.env.GOOGLE_MAPS_SERVER_API_KEY?.trim() || null;
@@ -39,7 +39,7 @@ export async function computeDrivingRoute(origin: Coordinates, destination: Coor
     headers: {
       "Content-Type": "application/json",
       "X-Goog-Api-Key": key,
-      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline",
     },
     body: JSON.stringify({
       origin: { location: { latLng: { latitude: origin.latitude, longitude: origin.longitude } } },
@@ -51,11 +51,12 @@ export async function computeDrivingRoute(origin: Coordinates, destination: Coor
     }),
   });
   if (!response.ok) throw new Error("Google could not calculate a driving route for these addresses.");
-  const data = await response.json() as { routes?: Array<{ distanceMeters?: number; duration?: string }> };
+  const data = await response.json() as { routes?: Array<{ distanceMeters?: number; duration?: string; polyline?: { encodedPolyline?: string } }> };
   const route = data.routes?.[0];
-  if (!route?.distanceMeters) throw new Error("No drivable route was found between these addresses.");
+  if (!route?.distanceMeters || !route.polyline?.encodedPolyline) throw new Error("No drivable route was found between these addresses.");
   return {
     distanceMeters: Math.round(route.distanceMeters),
     durationSeconds: Math.max(0, Math.round(Number.parseFloat(route.duration ?? "0"))),
+    encodedPolyline: route.polyline.encodedPolyline,
   };
 }

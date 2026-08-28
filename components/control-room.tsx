@@ -48,13 +48,14 @@ export function ControlRoom({ stats, scouts, missions }: { stats: { users: numbe
       </section>
 
       <section className="control-section">
-        <div className="control-section-title"><div><h2>Mission queue</h2><p>Opening a mission immediately alerts eligible approved Scouts.</p></div></div>
+        <div className="control-section-title"><div><h2>Mission queue</h2><p>New missions publish automatically. Pull an unclaimed mission when it needs review or correction.</p></div></div>
         {missions.length ? <div className="control-table mission-admin-list">{missions.map((mission) => <article key={mission.id}>
           <div className="control-primary"><small>{titleCase(mission.type)} It · {mission.customer}</small><strong>{mission.title}</strong><span>{mission.location} · Customer {money(mission.price)} · Scout {money(mission.payout)}</span><small>{mission.type === "move" ? mission.routeVerified && mission.routeMiles ? `${mission.routeMiles} road miles · Google-verified route` : "Route verification required before release" : mission.type === "meet" ? `${mission.authorizedMinutes / 60}-hour customer authorization` : "Fixed-price mission"}</small></div>
-          <span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{titleCase(mission.status)}</span>
+          <span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{mission.status === "draft" ? "Pulled" : titleCase(mission.status)}</span>
           <div className="control-actions">
             <Link href={`/dashboard/missions/${mission.id}`}>Open <IconArrowRight size={16} /></Link>
-            {mission.status === "draft" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "open"))}>Release to Scouts</button>}
+            {mission.status === "draft" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "open"))}>Reopen to Scouts</button>}
+            {mission.status === "open" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "draft"))}>Pull from Scouts</button>}
             {!['completed', 'cancelled'].includes(mission.status) && <button className="danger-link" disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "cancelled"))}>Cancel</button>}
           </div>
         </article>)}</div> : <div className="control-empty">No missions have been submitted.</div>}

@@ -57,6 +57,13 @@
       "when": 1787957373116,
       "tag": "0007_sticky_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787960264786,
+      "tag": "0008_salty_sabretooth",
+      "breakpoints": true
     }
   ]
 }

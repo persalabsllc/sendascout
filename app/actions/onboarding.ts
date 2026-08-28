@@ -1,10 +1,12 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
-import { missions, scoutProfiles, users } from "@/db/schema";
+import { missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pricing";
+import { alertEligibleScouts } from "@/lib/notifications";
 
 export type MissionInput = {
   type: "see" | "move" | "meet";
@@ -86,6 +88,8 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
 
     const user = await requireAppUser("customer");
     const amount = await calculateMissionQuote(input);
+    if (input.type === "move" && amount.routeSource !== "google") throw new Error("We could not verify the driving route. Please try again.");
+    if (input.type !== "move" && !amount.pickupCoordinates) throw new Error("We could not verify the mission location. Please check the address and try again.");
     const db = getDb();
 
     await db.update(users).set({ phone: input.phone.trim(), updatedAt: new Date() }).where(eq(users.id, user.id));
@@ -94,6 +98,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       .values({
         customerId: user.id,
         type: input.type,
+        status: "open",
         title: input.title.trim(),
         instructions: input.instructions.trim(),
         addressLine1: (input.type === "move" ? input.pickupAddress : input.address).trim(),
@@ -118,6 +123,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         dropoffLongitude: amount.dropoffCoordinates?.longitude.toFixed(6) ?? null,
         routeDistanceMeters: amount.routeDistanceMeters,
         routeDurationSeconds: amount.routeDurationSeconds,
+        routePolyline: amount.routePolyline,
         routeSource: amount.routeSource,
         routeQuotedAt: amount.routeSource === "google" ? new Date() : null,
         meetAuthorizedMinutes: input.type === "meet" ? input.meetAuthorizedMinutes : 60,
@@ -128,6 +134,16 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         platformFeeCents: amount.platformFeeCents,
       })
       .returning({ id: missions.id });
+
+    await db.insert(missionUpdates).values({ missionId: mission.id, authorId: user.id, status: "open", message: "Mission published automatically to eligible Scouts." });
+    try {
+      await alertEligibleScouts(mission.id);
+    } catch (alertError) {
+      console.error("Mission published, but Scout alerts could not be delivered", alertError);
+    }
+    revalidatePath("/dashboard/customer");
+    revalidatePath("/dashboard/scout");
+    revalidatePath("/control-room");
 
     return { ok: true, id: mission.id };
   } catch (error) {

@@ -11,6 +11,7 @@ export type MissionPriceQuote = {
   additionalRouteMiles: number;
   routeDistanceMeters: number | null;
   routeDurationSeconds: number | null;
+  routePolyline: string | null;
   routeSource: "google" | "zip_estimate" | "fixed";
   pickupCoordinates: Coordinates | null;
   dropoffCoordinates: Coordinates | null;
@@ -43,8 +44,8 @@ const MOVE_CUSTOMER_PER_EXTRA_MILE_CENTS = 175;
 const MOVE_SCOUT_PER_EXTRA_MILE_CENTS = 125;
 
 export function calculateMissionPrice(type: "see" | "move" | "meet", pickupZip?: string, dropoffZip?: string, largeItem = false): MissionPriceQuote {
-  if (type === "see") return quote(2900, 1800, null, 0, null, null, "fixed", null, null, 2900, 1800);
-  if (type === "meet") return quote(2900, 2000, null, 0, null, null, "fixed", null, null, 2900, 2000);
+  if (type === "see") return quote(2900, 1800, null, 0, null, null, null, "fixed", null, null, 2900, 1800);
+  if (type === "meet") return quote(2900, 2000, null, 0, null, null, null, "fixed", null, null, 2900, 2000);
 
   const zipDistance = distanceBetweenZips(pickupZip, dropoffZip);
   // ZIP centroids provide a conservative draft estimate until live route pricing is connected.
@@ -52,7 +53,7 @@ export function calculateMissionPrice(type: "see" | "move" | "meet", pickupZip?:
   const additionalRouteMiles = Math.max(0, (estimatedRouteMiles ?? 0) - MOVE_INCLUDED_ROUTE_MILES);
   const customer = 1900 + additionalRouteMiles * MOVE_CUSTOMER_PER_EXTRA_MILE_CENTS + (largeItem ? 1000 : 0);
   const scout = 1000 + additionalRouteMiles * MOVE_SCOUT_PER_EXTRA_MILE_CENTS + (largeItem ? 800 : 0);
-  return quote(customer, scout, estimatedRouteMiles, additionalRouteMiles, null, null, "zip_estimate", null, null, customer, scout);
+  return quote(customer, scout, estimatedRouteMiles, additionalRouteMiles, null, null, null, "zip_estimate", null, null, customer, scout);
 }
 
 export async function calculateMissionQuote(input: MissionQuoteInput): Promise<MissionPriceQuote> {
@@ -77,7 +78,7 @@ export async function calculateMissionQuote(input: MissionQuoteInput): Promise<M
   const additionalRouteMiles = Math.max(0, estimatedRouteMiles - MOVE_INCLUDED_ROUTE_MILES);
   const customer = 1900 + additionalRouteMiles * MOVE_CUSTOMER_PER_EXTRA_MILE_CENTS + (input.largeItem ? 1000 : 0);
   const scout = 1000 + additionalRouteMiles * MOVE_SCOUT_PER_EXTRA_MILE_CENTS + (input.largeItem ? 800 : 0);
-  return quote(customer, scout, estimatedRouteMiles, additionalRouteMiles, route.distanceMeters, route.durationSeconds, "google", pickupCoordinates, dropoffCoordinates, customer, scout);
+  return quote(customer, scout, estimatedRouteMiles, additionalRouteMiles, route.distanceMeters, route.durationSeconds, route.encodedPolyline, "google", pickupCoordinates, dropoffCoordinates, customer, scout);
 }
 
 export function meetPriceForMinutes(minutes: number) {
@@ -86,7 +87,7 @@ export function meetPriceForMinutes(minutes: number) {
   return { customer: 2900 + additionalQuarters * 625, scout: 2000 + additionalQuarters * 450 };
 }
 
-function quote(customerPriceCents: number, scoutPayoutCents: number, estimatedRouteMiles: number | null, additionalRouteMiles: number, routeDistanceMeters: number | null, routeDurationSeconds: number | null, routeSource: MissionPriceQuote["routeSource"], pickupCoordinates: Coordinates | null, dropoffCoordinates: Coordinates | null, maximumCustomerPriceCents: number, maximumScoutPayoutCents: number): MissionPriceQuote {
+function quote(customerPriceCents: number, scoutPayoutCents: number, estimatedRouteMiles: number | null, additionalRouteMiles: number, routeDistanceMeters: number | null, routeDurationSeconds: number | null, routePolyline: string | null, routeSource: MissionPriceQuote["routeSource"], pickupCoordinates: Coordinates | null, dropoffCoordinates: Coordinates | null, maximumCustomerPriceCents: number, maximumScoutPayoutCents: number): MissionPriceQuote {
   return {
     customerPriceCents,
     scoutPayoutCents,
@@ -95,6 +96,7 @@ function quote(customerPriceCents: number, scoutPayoutCents: number, estimatedRo
     additionalRouteMiles,
     routeDistanceMeters,
     routeDurationSeconds,
+    routePolyline,
     routeSource,
     pickupCoordinates,
     dropoffCoordinates,

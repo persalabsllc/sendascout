@@ -110,6 +110,7 @@ export const missions = pgTable("missions", {
   dropoffLongitude: numeric("dropoff_longitude", { precision: 9, scale: 6 }),
   routeDistanceMeters: integer("route_distance_meters"),
   routeDurationSeconds: integer("route_duration_seconds"),
+  routePolyline: text("route_polyline"),
   routeSource: text("route_source").notNull().default("fixed"),
   routeQuotedAt: timestamp("route_quoted_at", { withTimezone: true }),
   meetAuthorizedMinutes: integer("meet_authorized_minutes").notNull().default(60),

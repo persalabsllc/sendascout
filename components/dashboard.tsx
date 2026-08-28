@@ -137,5 +137,5 @@ function EmptyMissions({ customer = false }: { customer?: boolean }) {
 function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) { return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>; }
 function iconFor(type: MissionKind) { return type === "see" ? IconCamera : type === "move" ? IconRoute : IconClock; }
 function labelFor(type: MissionKind) { return type === "see" ? "See It" : type === "move" ? "Move It" : "Meet It"; }
-function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function statusLabel(status: string) { return status === "draft" ? "Paused by support" : status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function money(cents: number) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100); }
