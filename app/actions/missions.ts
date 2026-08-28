@@ -123,22 +123,21 @@ export async function submitMissionResults(id: string, summary: string, mediaUrl
     if (cleanSummary.length > 5000) throw new Error("Result notes are limited to 5,000 characters.");
 
     const db = getDb();
-    await db.transaction(async (tx) => {
-      await tx.insert(missionUpdates).values({
+    const resultUpdate = db.insert(missionUpdates).values({
         missionId: id,
         authorId: user.id,
         status: "submitted",
         message: cleanSummary || "Scout submitted mission media.",
       });
-      if (cleanUrls.length) {
-        await tx.insert(missionUpdates).values(cleanUrls.map((mediaUrl) => ({
+    const mediaUpdate = cleanUrls.length
+      ? db.insert(missionUpdates).values(cleanUrls.map((mediaUrl) => ({
           missionId: id,
           authorId: user.id,
           status: "submitted" as const,
           mediaUrl,
-        })));
-      }
-      await tx.update(missions).set({
+        })))
+      : null;
+    const missionUpdate = db.update(missions).set({
         status: "submitted",
         locationSharingActive: false,
         scoutLatitude: null,
@@ -147,7 +146,7 @@ export async function submitMissionResults(id: string, summary: string, mediaUrl
         scoutLocationUpdatedAt: null,
         updatedAt: new Date(),
       }).where(eq(missions.id, id));
-      await tx.insert(notifications).values({
+    const customerNotification = db.insert(notifications).values({
         recipientUserId: mission.customerId,
         missionId: id,
         channel: "in_app",
@@ -157,7 +156,8 @@ export async function submitMissionResults(id: string, summary: string, mediaUrl
         body: "Your Scout submitted notes and media for your review.",
         sentAt: new Date(),
       });
-    });
+    if (mediaUpdate) await db.batch([resultUpdate, mediaUpdate, missionUpdate, customerNotification]);
+    else await db.batch([resultUpdate, missionUpdate, customerNotification]);
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -239,16 +239,15 @@ export async function confirmMissionComplete(id: string): Promise<Result> {
     const mission = await getMission(id);
     if (mission.customerId !== user.id || mission.status !== "submitted") throw new Error("This mission is not ready for confirmation.");
     const db = getDb();
-    await db.transaction(async (tx) => {
-      await tx.update(missions).set({ status: "completed", completedAt: new Date(), locationSharingActive: false, scoutLatitude: null, scoutLongitude: null, scoutLocationAccuracyMeters: null, scoutLocationUpdatedAt: null, updatedAt: new Date() }).where(eq(missions.id, id));
-      await tx.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "completed", message: "Customer confirmed completion." });
-      if (mission.scoutId) {
-        await tx.update(scoutProfiles).set({
+    const missionUpdate = db.update(missions).set({ status: "completed", completedAt: new Date(), locationSharingActive: false, scoutLatitude: null, scoutLongitude: null, scoutLocationAccuracyMeters: null, scoutLocationUpdatedAt: null, updatedAt: new Date() }).where(eq(missions.id, id));
+    const completionUpdate = db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "completed", message: "Customer confirmed completion." });
+    if (mission.scoutId) {
+      const scoutUpdate = db.update(scoutProfiles).set({
           completedMissions: sql`${scoutProfiles.completedMissions} + 1`,
           updatedAt: new Date(),
         }).where(eq(scoutProfiles.userId, mission.scoutId));
-      }
-    });
+      await db.batch([missionUpdate, completionUpdate, scoutUpdate]);
+    } else await db.batch([missionUpdate, completionUpdate]);
     refreshMission(id);
     return { ok: true };
   } catch (error) {
