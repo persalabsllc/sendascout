@@ -9,7 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.0.1",
+    "@neondatabase/serverless": "^1.0.2",
     "@tabler/icons-react": "^3.34.1",
+    "drizzle-orm": "^0.44.7",
     "next": "^16.1.6",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
@@ -18,6 +21,7 @@
     "@types/node": "^22.15.3",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
+    "drizzle-kit": "^0.31.8",
     "eslint": "^9.25.1",
     "eslint-config-next": "^16.1.6",
     "typescript": "^5.8.3"
