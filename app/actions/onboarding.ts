@@ -8,6 +8,7 @@ import { requireAppUser } from "@/lib/app-user";
 export type MissionInput = {
   type: "see" | "move" | "meet";
   address: string;
+  addressLine2: string;
   city: string;
   zip: string;
   scheduledFor: string;
@@ -65,6 +66,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         title: input.title.trim(),
         instructions: input.instructions.trim(),
         addressLine1: input.address.trim(),
+        addressLine2: input.addressLine2.trim() || null,
         city: input.city.trim(),
         zip: input.zip.trim(),
         scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,

@@ -42,11 +42,11 @@ export function Dashboard({
           <Link className="active" href={scout ? "/dashboard/scout" : "/dashboard/customer"}><IconDashboard size={20} /> Overview</Link>
           <Link href="#missions"><IconTargetArrow size={20} /> {scout ? "Mission board" : "My missions"}</Link>
           <Link href="#payments"><IconWallet size={20} /> {scout ? "Earnings" : "Payments"}</Link>
-          <Link href="#profile"><IconUser size={20} /> Profile</Link>
+          <Link href={scout ? "/scout" : "/dashboard/customer/profile"}><IconUser size={20} /> Profile</Link>
         </nav>
         <div className="dash-sidebar-bottom">
           <Link href="#settings"><IconSettings size={19} /> Settings</Link>
-          <div className="dash-user"><span>{initials}</span><div><strong>{userName}</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
+          <div className="dash-user"><span>{initials}</span><div><strong>{userName || "Your account"}</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
         </div>
       </aside>
 
@@ -57,7 +57,7 @@ export function Dashboard({
         </header>
         <div className="dash-content">
           <div className="dash-welcome">
-            <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{scout ? `Welcome, ${userName}.` : `Welcome, ${userName}.`}</h1><p>{scout ? "Your application and nearby mission opportunities live here." : "Create a mission or follow along with one already underway."}</p></div>
+            <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{userName ? `Welcome, ${userName}.` : "Welcome!"}</h1><p>{scout ? "Your application and nearby mission opportunities live here." : "Create a mission or follow along with one already underway."}</p></div>
             <Link className="button" href={scout ? "#missions" : "/request"}>{scout ? "Browse missions" : "New mission"} {scout ? <IconArrowRight size={19} /> : <IconPlus size={19} />}</Link>
           </div>
           {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} /> : <CustomerOverview missions={missions} />}

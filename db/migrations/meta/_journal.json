@@ -15,6 +15,13 @@
       "when": 1787936408277,
       "tag": "0001_hesitant_stone_men",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787938542015,
+      "tag": "0002_customer_profile",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,12 @@ export const users = pgTable("users", {
   lastName: text("last_name"),
   email: text("email").notNull(),
   phone: text("phone"),
+  addressLine1: text("address_line_1"),
+  addressLine2: text("address_line_2"),
+  city: text("city"),
+  state: text("state"),
+  zip: text("zip"),
+  profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
