@@ -20,17 +20,27 @@ export type DashboardMission = {
   payoutCents?: number;
 };
 
+export type DashboardNotification = {
+  id: string;
+  title: string;
+  body: string;
+  missionId?: string | null;
+  createdAt: string;
+};
+
 export function Dashboard({
   role,
   userName,
   initials,
   missions = [],
+  notifications = [],
   profileStatus = "applicant",
 }: {
   role: Role;
   userName: string;
   initials: string;
   missions?: DashboardMission[];
+  notifications?: DashboardNotification[];
   profileStatus?: string;
 }) {
   const scout = role === "scout";
@@ -60,6 +70,7 @@ export function Dashboard({
             <div><span className="kicker">{scout ? "Scout command center" : "Customer dashboard"}</span><h1>{userName ? `Welcome, ${userName}.` : "Welcome!"}</h1><p>{scout ? "Your application and nearby mission opportunities live here." : "Create a mission or follow along with one already underway."}</p></div>
             <Link className="button" href={scout ? "#missions" : "/request"}>{scout ? "Browse missions" : "New mission"} {scout ? <IconArrowRight size={19} /> : <IconPlus size={19} />}</Link>
           </div>
+          {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div>{notifications[0].missionId && <Link href={`/dashboard/missions/${notifications[0].missionId}`}>Open <IconArrowRight size={17} /></Link>}</section>}
           {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
@@ -80,7 +91,7 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
       <div className="dash-section-title"><div><h2>Your missions</h2><p>Drafts and active work in one place.</p></div><Link href="/request">Create mission <IconArrowRight size={17} /></Link></div>
       {missions.length ? <div className="mission-list">{missions.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <article key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></article>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></Link>;
       })}</div> : <EmptyMissions customer />}
     </section>
     <div className="empty-prompt" id="payments"><span><IconShieldCheck size={30} /></span><div><h3>Payments activate at launch</h3><p>Customer payment will be authorized when a Scout accepts and released after successful completion.</p></div></div>
@@ -100,7 +111,7 @@ function ScoutOverview({ missions, profileStatus }: { missions: DashboardMission
       <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities near your launch area.</p></div></div>
       {missions.length ? <div className="mission-list scout-list">{missions.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <article key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><button className="claim-button" disabled>Coming soon</button></article>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.status === "open" ? "Review" : "Open"}</span></Link>;
       })}</div> : <EmptyMissions />}
     </section>
   </>;

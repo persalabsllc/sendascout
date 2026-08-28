@@ -22,12 +22,18 @@ export const missionStatus = pgEnum("mission_status", [
   "claimed",
   "en_route",
   "onsite",
+  "en_route_pickup",
+  "at_pickup",
+  "en_route_dropoff",
+  "at_dropoff",
   "submitted",
   "completed",
   "cancelled",
   "disputed",
 ]);
 export const paymentStatus = pgEnum("payment_status", ["unpaid", "authorized", "paid", "refunded", "failed"]);
+export const notificationChannel = pgEnum("notification_channel", ["in_app", "sms", "email"]);
+export const notificationStatus = pgEnum("notification_status", ["pending", "sent", "failed"]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -101,6 +107,11 @@ export const missions = pgTable("missions", {
   platformFeeCents: integer("platform_fee_cents").notNull(),
   paymentStatus: paymentStatus("payment_status").notNull().default("unpaid"),
   stripePaymentIntentId: text("stripe_payment_intent_id"),
+  locationSharingActive: boolean("location_sharing_active").notNull().default(false),
+  scoutLatitude: numeric("scout_latitude", { precision: 9, scale: 6 }),
+  scoutLongitude: numeric("scout_longitude", { precision: 9, scale: 6 }),
+  scoutLocationAccuracyMeters: integer("scout_location_accuracy_meters"),
+  scoutLocationUpdatedAt: timestamp("scout_location_updated_at", { withTimezone: true }),
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -121,6 +132,36 @@ export const missionUpdates = pgTable("mission_updates", {
   mediaUrl: text("media_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("mission_updates_mission_idx").on(table.missionId)]);
+
+export const missionMessages = pgTable("mission_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  senderId: uuid("sender_id").notNull().references(() => users.id),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_messages_mission_idx").on(table.missionId),
+  index("mission_messages_sender_idx").on(table.senderId),
+]);
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  recipientUserId: uuid("recipient_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  missionId: uuid("mission_id").references(() => missions.id, { onDelete: "cascade" }),
+  channel: notificationChannel("channel").notNull().default("in_app"),
+  status: notificationStatus("status").notNull().default("pending"),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  providerMessageId: text("provider_message_id"),
+  error: text("error"),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("notifications_recipient_idx").on(table.recipientUserId),
+  index("notifications_mission_idx").on(table.missionId),
+]);
 
 export const payments = pgTable("payments", {
   id: uuid("id").defaultRandom().primaryKey(),

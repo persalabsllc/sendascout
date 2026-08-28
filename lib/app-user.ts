@@ -49,3 +49,26 @@ export async function requireAppUser(preferredRole: AppRole = "customer") {
 
   return created;
 }
+
+export async function requireAdminUser() {
+  const user = await requireAppUser("admin");
+  const configuredAdmins = (process.env.SENDASCOUT_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (user.role !== "admin" && !configuredAdmins.includes(user.email.toLowerCase())) {
+    throw new Error("This account does not have Send a Scout administrator access.");
+  }
+
+  if (user.role !== "admin") {
+    const [admin] = await getDb()
+      .update(users)
+      .set({ role: "admin", updatedAt: new Date() })
+      .where(eq(users.id, user.id))
+      .returning();
+    return admin;
+  }
+
+  return user;
+}

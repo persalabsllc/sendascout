@@ -1,8 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { Dashboard, type DashboardMission } from "@/components/dashboard";
+import { Dashboard, type DashboardMission, type DashboardNotification } from "@/components/dashboard";
 import { getDb } from "@/db";
-import { missions, scoutProfiles } from "@/db/schema";
+import { missions, notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export const metadata = { title: "Scout Dashboard | Send a Scout", robots: { index: false, follow: false } };
@@ -12,8 +12,14 @@ export default async function ScoutDashboard() {
   const db = getDb();
   const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
   if (!profile) redirect("/scout");
-  const rows = await db.select().from(missions).where(and(eq(missions.status, "open"))).orderBy(desc(missions.createdAt));
-  const dashboardMissions: DashboardMission[] = rows.map((mission) => ({
+  const [rows, alertRows] = await Promise.all([
+    profile.status === "approved"
+      ? db.select().from(missions).where(or(eq(missions.status, "open"), eq(missions.scoutId, user.id))).orderBy(desc(missions.createdAt))
+      : db.select().from(missions).where(eq(missions.scoutId, user.id)).orderBy(desc(missions.createdAt)),
+    db.select().from(notifications).where(and(eq(notifications.recipientUserId, user.id), eq(notifications.channel, "in_app"), isNull(notifications.readAt))).orderBy(desc(notifications.createdAt)).limit(5),
+  ]);
+  const eligibleRows = rows.filter((mission) => mission.scoutId === user.id || (mission.type === "see" ? profile.canSee : mission.type === "move" ? profile.canMove : profile.canMeet));
+  const dashboardMissions: DashboardMission[] = eligibleRows.map((mission) => ({
     id: mission.id, type: mission.type, title: mission.title,
     place: `${mission.city}, ${mission.state} ${mission.zip}`,
     status: mission.status, time: mission.scheduledFor ? mission.scheduledFor.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "ASAP",
@@ -21,5 +27,6 @@ export default async function ScoutDashboard() {
   }));
   const name = user.firstName || "Scout";
   const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase() || "SA";
-  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} profileStatus={profile.status} />;
+  const dashboardNotifications: DashboardNotification[] = alertRows.map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
+  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} />;
 }
