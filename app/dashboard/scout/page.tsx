@@ -24,9 +24,18 @@ export default async function ScoutDashboard() {
     place: `${mission.city}, ${mission.state} ${mission.zip}`,
     status: mission.status, time: mission.scheduledFor ? mission.scheduledFor.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "ASAP",
     payoutCents: mission.scoutPayoutCents,
+    assigned: mission.scoutId === user.id,
   }));
   const name = user.firstName || "Scout";
   const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase() || "SA";
-  const dashboardNotifications: DashboardNotification[] = alertRows.map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
+  const missionById = new Map(rows.map((mission) => [mission.id, mission]));
+  const dashboardNotifications: DashboardNotification[] = alertRows
+    .filter((item) => {
+      if (!item.missionId) return true;
+      const mission = missionById.get(item.missionId);
+      if (item.kind === "new_mission") return mission?.status === "open";
+      return !mission || !["completed", "cancelled", "disputed"].includes(mission.status);
+    })
+    .map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
   return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} />;
 }
