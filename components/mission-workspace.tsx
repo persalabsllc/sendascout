@@ -124,12 +124,12 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
         for (const file of resultFiles) {
           const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
           const blob = await upload(`mission-results/${mission.id}/${safeName}`, file, {
-            access: "public",
+            access: "private",
             handleUploadUrl: "/api/mission-results/upload",
             clientPayload: JSON.stringify({ missionId: mission.id }),
             multipart: file.size > 5 * 1024 * 1024,
           });
-          mediaUrls.push(blob.url);
+          mediaUrls.push(blob.pathname);
         }
         const result = await submitMissionResults(mission.id, resultSummary, mediaUrls);
         if (!result.ok) setError(result.error);
@@ -229,7 +229,7 @@ function nextStatus(type: MissionView["type"], status: Status): { status: Status
 }
 
 function ResultPanel({ results }: { results: ResultView }) {
-  return <article className="mission-panel result-panel"><div className="panel-heading"><IconCheck size={22} /><div><h2>Mission results</h2><p>{results.submittedAt ? `Submitted ${new Date(results.submittedAt).toLocaleString()}` : "Submitted by the Scout"}</p></div></div>{results.summary && <p className="result-summary">{results.summary}</p>}{results.mediaUrls.length > 0 && <div className="result-gallery">{results.mediaUrls.map((url) => isVideo(url) ? <video controls preload="metadata" src={url} key={url} /> : <a href={url} target="_blank" rel="noreferrer" key={url}><img src={url} alt="Scout mission result" /></a>)}</div>}</article>;
+  return <article className="mission-panel result-panel"><div className="panel-heading"><IconCheck size={22} /><div><h2>Mission results</h2><p>{results.submittedAt ? `Submitted ${new Date(results.submittedAt).toLocaleString()}` : "Submitted by the Scout"}</p></div></div>{results.summary && <p className="result-summary">{results.summary}</p>}{results.mediaUrls.length > 0 && <div className="result-gallery">{results.mediaUrls.map((url) => isVideo(url) ? <video controls preload="metadata" src={url} key={url} /> : <a href={url} target="_blank" rel="noreferrer" key={url}><img loading="lazy" src={url} alt="Scout mission result" /></a>)}</div>}</article>;
 }
 
 function statusLabel(type: MissionView["type"], status: Status) {

@@ -114,7 +114,11 @@ export async function submitMissionResults(id: string, summary: string, mediaUrl
     if (!ready) throw new Error("Finish the mission steps before submitting results.");
 
     const cleanSummary = summary.trim();
-    const cleanUrls = [...new Set(mediaUrls.map((url) => url.trim()).filter((url) => /^https:\/\//.test(url)))].slice(0, 12);
+    const mediaPrefix = `mission-results/${id}/`;
+    const cleanUrls = [...new Set(mediaUrls
+      .map((url) => url.trim())
+      .filter((url) => url.startsWith(mediaPrefix) && !url.includes("..")))]
+      .slice(0, 12);
     if (!cleanSummary && cleanUrls.length === 0) throw new Error("Add a written result, photo, or video before submitting.");
     if (cleanSummary.length > 5000) throw new Error("Result notes are limited to 5,000 characters.");
 

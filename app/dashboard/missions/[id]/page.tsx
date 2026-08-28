@@ -81,10 +81,14 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     }))}
     results={{
       summary: resultRows.find((item) => item.message)?.message ?? null,
-      mediaUrls: resultRows.flatMap((item) => item.mediaUrl ? [item.mediaUrl] : []),
+      mediaUrls: resultRows.flatMap((item) => item.mediaUrl ? [privateMediaUrl(mission.id, item.mediaUrl)] : []),
       submittedAt: resultRows[0]?.createdAt.toISOString() ?? null,
     }}
   />;
+}
+
+function privateMediaUrl(missionId: string, pathname: string) {
+  return `/api/mission-results/media?missionId=${encodeURIComponent(missionId)}&pathname=${encodeURIComponent(pathname)}`;
 }
 
 function formatLocation(name: string | null, line1: string, line2: string | null, city: string | null, state: string | null, zip: string | null) {
