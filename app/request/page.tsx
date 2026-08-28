@@ -13,5 +13,5 @@ export default async function RequestPage({ searchParams }: { searchParams: Prom
     addressLine2: user.addressLine2 ?? "",
     city: user.city ?? "",
     zip: user.zip ?? "",
-  }} />;
+  }} initialPhone={user.phone ?? ""} />;
 }

@@ -11,6 +11,20 @@ export type MissionInput = {
   addressLine2: string;
   city: string;
   zip: string;
+  pickupName: string;
+  pickupAddress: string;
+  pickupAddressLine2: string;
+  pickupCity: string;
+  pickupState: string;
+  pickupZip: string;
+  pickupInstructions: string;
+  dropoffName: string;
+  dropoffAddress: string;
+  dropoffAddressLine2: string;
+  dropoffCity: string;
+  dropoffState: string;
+  dropoffZip: string;
+  deliveryInstructions: string;
   scheduledFor: string;
   title: string;
   instructions: string;
@@ -45,13 +59,28 @@ function required(value: string, label: string) {
 
 export async function createMission(input: MissionInput): Promise<OnboardingResult> {
   try {
-    required(input.address, "Mission address");
-    required(input.city, "City");
-    required(input.zip, "ZIP code");
-    required(input.title, "Mission title");
-    required(input.instructions, "Instructions");
+    if (input.type === "move") {
+      required(input.pickupName, "Pickup name");
+      required(input.pickupAddress, "Pickup address");
+      required(input.pickupCity, "Pickup city");
+      required(input.pickupState, "Pickup state");
+      required(input.pickupZip, "Pickup ZIP code");
+      required(input.dropoffName, "Drop-off name");
+      required(input.dropoffAddress, "Drop-off address");
+      required(input.dropoffCity, "Drop-off city");
+      required(input.dropoffState, "Drop-off state");
+      required(input.dropoffZip, "Drop-off ZIP code");
+      if (!/^\d{5}(?:-\d{4})?$/.test(input.pickupZip.trim())) throw new Error("Enter a valid pickup ZIP code.");
+      if (!/^\d{5}(?:-\d{4})?$/.test(input.dropoffZip.trim())) throw new Error("Enter a valid drop-off ZIP code.");
+    } else {
+      required(input.address, "Mission address");
+      required(input.city, "City");
+      required(input.zip, "ZIP code");
+      if (!/^\d{5}(?:-\d{4})?$/.test(input.zip.trim())) throw new Error("Enter a valid ZIP code.");
+    }
+    required(input.title, input.type === "move" ? "Item description" : "Mission title");
+    required(input.instructions, input.type === "move" ? "Item and handling details" : "Instructions");
     required(input.phone, "Phone number");
-    if (!/^\d{5}(?:-\d{4})?$/.test(input.zip.trim())) throw new Error("Enter a valid ZIP code.");
 
     const user = await requireAppUser("customer");
     const amount = pricing[input.type];
@@ -65,10 +94,20 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         type: input.type,
         title: input.title.trim(),
         instructions: input.instructions.trim(),
-        addressLine1: input.address.trim(),
-        addressLine2: input.addressLine2.trim() || null,
-        city: input.city.trim(),
-        zip: input.zip.trim(),
+        addressLine1: (input.type === "move" ? input.pickupAddress : input.address).trim(),
+        addressLine2: (input.type === "move" ? input.pickupAddressLine2 : input.addressLine2).trim() || null,
+        city: (input.type === "move" ? input.pickupCity : input.city).trim(),
+        state: input.type === "move" ? input.pickupState.trim().toUpperCase() : "NC",
+        zip: (input.type === "move" ? input.pickupZip : input.zip).trim(),
+        pickupName: input.type === "move" ? input.pickupName.trim() : null,
+        pickupInstructions: input.type === "move" ? input.pickupInstructions.trim() || null : null,
+        dropoffName: input.type === "move" ? input.dropoffName.trim() : null,
+        dropoffAddressLine1: input.type === "move" ? input.dropoffAddress.trim() : null,
+        dropoffAddressLine2: input.type === "move" ? input.dropoffAddressLine2.trim() || null : null,
+        dropoffCity: input.type === "move" ? input.dropoffCity.trim() : null,
+        dropoffState: input.type === "move" ? input.dropoffState.trim().toUpperCase() : null,
+        dropoffZip: input.type === "move" ? input.dropoffZip.trim() : null,
+        deliveryInstructions: input.type === "move" ? input.deliveryInstructions.trim() || null : null,
         scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
         customerPriceCents: amount.customer,
         scoutPayoutCents: amount.scout,

@@ -22,6 +22,13 @@
       "when": 1787938542015,
       "tag": "0002_customer_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787939627320,
+      "tag": "0003_move_it_route",
+      "breakpoints": true
     }
   ]
 }
