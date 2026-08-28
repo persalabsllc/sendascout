@@ -9,7 +9,7 @@ import {
   IconNavigation, IconPhoto, IconRoute, IconSend, IconShieldCheck,
 } from "@tabler/icons-react";
 import {
-  claimMission, confirmMissionComplete, sendMissionMessage, setLocationSharing,
+  approveMeetExtension, claimMission, confirmMissionComplete, sendMissionMessage, setLocationSharing,
   submitMissionResults, updateMissionLocation, updateMissionStatus,
 } from "@/app/actions/missions";
 
@@ -28,6 +28,18 @@ type MissionView = {
   customerPriceCents: number;
   scoutPayoutCents: number;
   largeItem: boolean;
+  routeDistanceMeters?: number | null;
+  routeDurationSeconds?: number | null;
+  routeSource: string;
+  meetAuthorizedMinutes: number;
+  maximumCustomerPriceCents?: number | null;
+  maximumScoutPayoutCents?: number | null;
+  billableStartedAt?: string | null;
+  billableEndedAt?: string | null;
+  billableMinutes?: number | null;
+  chargedMinutes?: number | null;
+  verifiedCheckInAt?: string | null;
+  verifiedCheckOutAt?: string | null;
   locationSharingActive: boolean;
   latitude?: number | null;
   longitude?: number | null;
@@ -46,6 +58,7 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
   const [resultSummary, setResultSummary] = useState("");
   const [resultFiles, setResultFiles] = useState<File[]>([]);
   const [tracking, setTracking] = useState(mission.locationSharingActive);
+  const [clock, setClock] = useState<number | null>(null);
   const lastLocationSent = useRef(0);
   const assigned = Boolean(mission.scoutName);
 
@@ -72,6 +85,14 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
     });
     return () => navigator.geolocation.clearWatch(watcher);
   }, [mission.id, role, tracking]);
+
+  useEffect(() => {
+    if (!mission.billableStartedAt || mission.billableEndedAt) return;
+    const tick = () => setClock(Date.now());
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [mission.billableEndedAt, mission.billableStartedAt]);
 
   function run(action: () => Promise<{ ok: true } | { ok: false; error: string }>) {
     setError("");
@@ -160,11 +181,14 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
               <LocationStop number="1" label={mission.type === "move" ? "Pickup" : "Mission location"} location={mission.pickup} instructions={mission.pickupInstructions} />
               {mission.dropoff && <LocationStop number="2" label="Drop-off" location={mission.dropoff} instructions={mission.deliveryInstructions} />}
               {mission.type === "move" && <div className="mission-instructions"><strong>Vehicle requirement</strong><p>{mission.largeItem ? "Larger item — SUV, van or pickup truck requested" : "Small item — fits in a car or trunk"}</p></div>}
+              {mission.type === "move" && <div className="mission-instructions"><strong>{mission.routeSource === "google" ? "Locked driving route" : "Route verification"}</strong><p>{mission.routeDistanceMeters ? `${routeMiles(mission.routeDistanceMeters)} road miles · approximately ${routeDuration(mission.routeDurationSeconds)}` : "Exact road mileage will be locked before this mission is released to Scouts."}</p></div>}
               <div className="mission-instructions"><strong>Mission instructions</strong><p>{mission.instructions}</p></div>
               {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {new Date(mission.scheduledFor).toLocaleString()}</p>}
             </article>
 
-            {canClaim && <article className="mission-panel claim-panel"><IconShieldCheck size={28} /><div><h2>Ready to take this mission?</h2><p>You’ll receive the full address and private customer chat after claiming.</p></div><button className="button" disabled={pending} onClick={() => run(() => claimMission(mission.id))}>Claim for {money(mission.scoutPayoutCents)}</button></article>}
+            {canClaim && <article className="mission-panel claim-panel"><IconShieldCheck size={28} /><div><h2>Ready to take this mission?</h2><p>{mission.type === "meet" && mission.maximumScoutPayoutCents && mission.maximumScoutPayoutCents > mission.scoutPayoutCents ? `${money(mission.scoutPayoutCents)} guaranteed first hour · up to ${money(mission.maximumScoutPayoutCents)} currently authorized` : "You’ll receive the full address and private customer chat after claiming."}</p></div><button className="button" disabled={pending} onClick={() => run(() => claimMission(mission.id))}>Claim for {money(mission.scoutPayoutCents)}</button></article>}
+
+            {mission.type === "meet" && assigned && <MeetTimerPanel role={role} mission={mission} clock={clock} pending={pending} extend={() => run(() => approveMeetExtension(mission.id))} />}
 
             {role === "scout" && assigned && !["submitted", "completed", "cancelled", "disputed"].includes(mission.status) && <article className="mission-panel action-panel">
               <div><h2>Scout controls</h2><p>Update the customer as you move through the mission.</p></div>
@@ -225,9 +249,25 @@ function nextStatus(type: MissionView["type"], status: Status): { status: Status
   }
   const steps: Partial<Record<Status, { status: Status; label: string }>> = {
     claimed: { status: "en_route", label: "Start trip to location" },
-    en_route: { status: "onsite", label: "I’ve arrived at location" },
+    en_route: { status: "onsite", label: type === "meet" ? "Verify arrival and start timer" : "I’ve arrived at location" },
   };
   return steps[status] ?? null;
+}
+
+function MeetTimerPanel({ role, mission, clock, pending, extend }: { role: "customer" | "scout" | "admin"; mission: MissionView; clock: number | null; pending: boolean; extend: () => void }) {
+  const startedAt = mission.billableStartedAt ? new Date(mission.billableStartedAt).getTime() : null;
+  const endedAt = mission.billableEndedAt ? new Date(mission.billableEndedAt).getTime() : null;
+  const effectiveNow = endedAt ?? clock;
+  const elapsedSeconds = startedAt && effectiveNow ? Math.max(0, Math.min(mission.meetAuthorizedMinutes * 60, Math.floor((effectiveNow - startedAt) / 1000))) : 0;
+  const cap = money(mission.maximumCustomerPriceCents ?? 2900);
+  return <article className="mission-panel timer-panel">
+    <div className="panel-heading"><IconClock size={22} /><div><h2>Verified appointment time</h2><p>Server-controlled billing with onsite GPS verification</p></div></div>
+    <div className="timer-display"><small>{mission.billableEndedAt ? "Final verified time" : mission.billableStartedAt ? "Verified timer running" : "Timer has not started"}</small><strong>{formatElapsed(elapsedSeconds)}</strong><span>{mission.meetAuthorizedMinutes / 60} hour{mission.meetAuthorizedMinutes === 60 ? "" : "s"} authorized · {cap} maximum</span></div>
+    {!mission.billableStartedAt && <p className="timer-note">The timer starts only after the scheduled time, current GPS confirms the Scout is onsite, and the Scout taps verified check-in. Travel and early arrival do not count.</p>}
+    {mission.billableStartedAt && !mission.billableEndedAt && <p className="timer-note">Only time backed by recent onsite location heartbeats counts. Earnings stop automatically at the authorized limit.</p>}
+    {mission.billableEndedAt && <p className="timer-note">Customer charged for {mission.chargedMinutes ?? 60} minutes. Actual verified presence: {mission.billableMinutes ?? 0} minutes.</p>}
+    {role === "customer" && mission.status === "onsite" && mission.meetAuthorizedMinutes < 480 && <button className="button button-small" disabled={pending} onClick={extend}>Authorize one additional hour</button>}
+  </article>;
 }
 
 function ResultPanel({ results }: { results: ResultView }) {
@@ -252,3 +292,6 @@ function approximateMapUrl(latitude: number, longitude: number) {
 function readyForResults(mission: MissionView) { return mission.type === "move" ? mission.status === "at_dropoff" : mission.status === "onsite"; }
 function isVideo(url: string) { return /\.(mp4|mov|webm)(?:\?|$)/i.test(url); }
 function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
+function routeMiles(meters: number) { return Math.max(1, Math.ceil(meters / 1609.344)); }
+function routeDuration(seconds?: number | null) { if (!seconds) return "route time unavailable"; const minutes = Math.max(1, Math.round(seconds / 60)); return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min`; }
+function formatElapsed(seconds: number) { const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remaining = seconds % 60; return [hours, minutes, remaining].map((value) => String(value).padStart(2, "0")).join(":"); }

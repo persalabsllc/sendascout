@@ -42,6 +42,9 @@ export default async function ControlRoomPage() {
       location: `${mission.city}, ${mission.state} ${mission.zip}`,
       price: mission.customerPriceCents,
       payout: mission.scoutPayoutCents,
+      routeMiles: mission.routeDistanceMeters ? Math.max(1, Math.ceil(mission.routeDistanceMeters / 1609.344)) : null,
+      routeVerified: mission.routeSource === "google",
+      authorizedMinutes: mission.meetAuthorizedMinutes,
       createdAt: mission.createdAt.toISOString(),
     }))}
   />;

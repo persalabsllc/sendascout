@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { missions, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
-import { calculateMissionPrice, type MissionPriceQuote } from "@/lib/mission-pricing";
+import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pricing";
 
 export type MissionInput = {
   type: "see" | "move" | "meet";
@@ -27,6 +27,7 @@ export type MissionInput = {
   dropoffZip: string;
   deliveryInstructions: string;
   largeItem: boolean;
+  meetAuthorizedMinutes: number;
   scheduledFor: string;
   title: string;
   instructions: string;
@@ -53,8 +54,8 @@ function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
 }
 
-export async function getMissionPriceQuote(input: Pick<MissionInput, "type" | "pickupZip" | "dropoffZip" | "largeItem">): Promise<MissionPriceQuote> {
-  return calculateMissionPrice(input.type, input.pickupZip, input.dropoffZip, input.largeItem);
+export async function getMissionPriceQuote(input: MissionInput): Promise<MissionPriceQuote> {
+  return calculateMissionQuote(input);
 }
 
 export async function createMission(input: MissionInput): Promise<OnboardingResult> {
@@ -81,9 +82,10 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     required(input.title, input.type === "move" ? "Item description" : "Mission title");
     required(input.instructions, input.type === "move" ? "Item and handling details" : "Instructions");
     required(input.phone, "Phone number");
+    if (input.type === "meet" && ![60, 120, 180, 240].includes(input.meetAuthorizedMinutes)) throw new Error("Choose a valid maximum appointment time.");
 
     const user = await requireAppUser("customer");
-    const amount = calculateMissionPrice(input.type, input.pickupZip, input.dropoffZip, input.largeItem);
+    const amount = await calculateMissionQuote(input);
     const db = getDb();
 
     await db.update(users).set({ phone: input.phone.trim(), updatedAt: new Date() }).where(eq(users.id, user.id));
@@ -110,6 +112,17 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         deliveryInstructions: input.type === "move" ? input.deliveryInstructions.trim() || null : null,
         largeItem: input.type === "move" && input.largeItem,
         scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
+        pickupLatitude: amount.pickupCoordinates?.latitude.toFixed(6) ?? null,
+        pickupLongitude: amount.pickupCoordinates?.longitude.toFixed(6) ?? null,
+        dropoffLatitude: amount.dropoffCoordinates?.latitude.toFixed(6) ?? null,
+        dropoffLongitude: amount.dropoffCoordinates?.longitude.toFixed(6) ?? null,
+        routeDistanceMeters: amount.routeDistanceMeters,
+        routeDurationSeconds: amount.routeDurationSeconds,
+        routeSource: amount.routeSource,
+        routeQuotedAt: amount.routeSource === "google" ? new Date() : null,
+        meetAuthorizedMinutes: input.type === "meet" ? input.meetAuthorizedMinutes : 60,
+        maximumCustomerPriceCents: amount.maximumCustomerPriceCents,
+        maximumScoutPayoutCents: amount.maximumScoutPayoutCents,
         customerPriceCents: amount.customerPriceCents,
         scoutPayoutCents: amount.scoutPayoutCents,
         platformFeeCents: amount.platformFeeCents,

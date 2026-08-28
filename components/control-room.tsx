@@ -8,7 +8,7 @@ import { adminSetMissionStatus, adminSetScoutStatus } from "@/app/actions/missio
 import { Brand } from "./brand";
 
 type ScoutRow = { id: string; name: string; email: string; phone: string; zip: string; vehicle: string; radius: number; status: string; capabilities: string };
-type MissionRow = { id: string; title: string; type: string; status: string; customer: string; location: string; price: number; payout: number; createdAt: string };
+type MissionRow = { id: string; title: string; type: string; status: string; customer: string; location: string; price: number; payout: number; routeMiles: number | null; routeVerified: boolean; authorizedMinutes: number; createdAt: string };
 
 export function ControlRoom({ stats, scouts, missions }: { stats: { users: number; applicants: number; open: number; active: number }; scouts: ScoutRow[]; missions: MissionRow[] }) {
   const router = useRouter();
@@ -50,7 +50,7 @@ export function ControlRoom({ stats, scouts, missions }: { stats: { users: numbe
       <section className="control-section">
         <div className="control-section-title"><div><h2>Mission queue</h2><p>Opening a mission immediately alerts eligible approved Scouts.</p></div></div>
         {missions.length ? <div className="control-table mission-admin-list">{missions.map((mission) => <article key={mission.id}>
-          <div className="control-primary"><small>{titleCase(mission.type)} It · {mission.customer}</small><strong>{mission.title}</strong><span>{mission.location} · Customer {money(mission.price)} · Scout {money(mission.payout)}</span></div>
+          <div className="control-primary"><small>{titleCase(mission.type)} It · {mission.customer}</small><strong>{mission.title}</strong><span>{mission.location} · Customer {money(mission.price)} · Scout {money(mission.payout)}</span><small>{mission.type === "move" ? mission.routeVerified && mission.routeMiles ? `${mission.routeMiles} road miles · Google-verified route` : "Route verification required before release" : mission.type === "meet" ? `${mission.authorizedMinutes / 60}-hour customer authorization` : "Fixed-price mission"}</small></div>
           <span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{titleCase(mission.status)}</span>
           <div className="control-actions">
             <Link href={`/dashboard/missions/${mission.id}`}>Open <IconArrowRight size={16} /></Link>
