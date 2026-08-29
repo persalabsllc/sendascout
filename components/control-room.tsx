@@ -4,10 +4,10 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { IconArrowRight, IconBriefcase, IconCheck, IconRoute, IconShieldCheck, IconUsers, IconX } from "@tabler/icons-react";
-import { adminSetMissionStatus, adminSetScoutStatus } from "@/app/actions/missions";
+import { adminRecordScoutIdentity, adminSetMissionStatus, adminSetScoutStatus } from "@/app/actions/missions";
 import { Brand } from "./brand";
 
-type ScoutRow = { id: string; name: string; email: string; phone: string; zip: string; vehicle: string; radius: number; status: string; capabilities: string };
+type ScoutRow = { id: string; name: string; email: string; phone: string; zip: string; vehicle: string; radius: number; status: string; capabilities: string; identityStatus: string; identityProvider: string | null; identityVerifiedAt: string | null; legalVersion: string | null; legalAcceptedAt: string | null };
 type MissionRow = { id: string; title: string; type: string; status: string; customer: string; location: string; price: number; payout: number; routeMiles: number | null; routeVerified: boolean; authorizedMinutes: number; createdAt: string };
 
 export function ControlRoom({ stats, scouts, missions }: { stats: { users: number; applicants: number; open: number; active: number }; scouts: ScoutRow[]; missions: MissionRow[] }) {
@@ -37,14 +37,16 @@ export function ControlRoom({ stats, scouts, missions }: { stats: { users: numbe
       <section className="control-section">
         <div className="control-section-title"><div><h2>Scout applications</h2><p>Approve only after identity, driving and background review.</p></div></div>
         {scouts.length ? <div className="control-table">{scouts.map((scout) => <article key={scout.id}>
-          <div className="control-primary"><strong>{scout.name}</strong><span>{scout.email} · {scout.phone || "No phone"}</span><small>{scout.vehicle || "Vehicle not provided"} · {scout.zip} + {scout.radius} miles · {scout.capabilities}</small></div>
+          <div className="control-primary"><strong>{scout.name}</strong><span>{scout.email} · {scout.phone || "No phone"}</span><small>{scout.vehicle || "Vehicle not provided"} · {scout.zip} + {scout.radius} miles · {scout.capabilities}</small><small>{scout.identityStatus === "clear" ? `Identity verified${scout.identityVerifiedAt ? ` ${new Date(scout.identityVerifiedAt).toLocaleDateString()}` : ""}` : "Identity not yet verified"} · {scout.legalVersion ? `Terms ${scout.legalVersion} accepted` : "Terms acceptance pending"}</small></div>
           <span className="status">{titleCase(scout.status)}</span>
           <div className="control-actions">
+            {scout.identityStatus !== "clear" && <button disabled={pending} onClick={() => run(() => adminRecordScoutIdentity(scout.id))}><IconShieldCheck size={16} /> Record ID verified</button>}
             {scout.status !== "approved" && <button disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "approved"))}><IconCheck size={16} /> Approve</button>}
             {scout.status === "approved" && <button disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "paused"))}>Pause</button>}
             {scout.status !== "rejected" && <button className="danger-link" disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "rejected"))}><IconX size={16} /> Reject</button>}
           </div>
         </article>)}</div> : <div className="control-empty">No Scout applications yet.</div>}
+        <p className="control-review-note">Record identity as verified only after comparing an original government-issued photo ID with the Scout live, in person or by video. Never accept an ID through email or mission chat. The platform records the reviewer and date, not a copy of the document.</p>
       </section>
 
       <section className="control-section">

@@ -53,6 +53,7 @@ type MissionView = {
   scoutCompletedMissions: number;
   scoutRating?: number | null;
   scoutRatingCount: number;
+  scoutIdentityVerified: boolean;
 };
 type MessageView = { id: string; body: string; sender: string; mine: boolean; createdAt: string };
 type ResultView = { summary: string | null; mediaUrls: string[]; submittedAt: string | null };
@@ -263,7 +264,7 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
 }
 
 function ScoutIdentityCard({ mission }: { mission: MissionView }) {
-  return <article className="mission-panel scout-identity-card"><div className="scout-headshot">{mission.scoutHeadshotUrl ? <Image src={mission.scoutHeadshotUrl} alt={`${mission.scoutName} profile photo`} width={76} height={76} unoptimized /> : <span>{mission.scoutName?.slice(0, 1).toUpperCase()}</span>}</div><div><small>Your Scout</small><h2>{mission.scoutName}</h2><p>{mission.scoutCompletedMissions} completed mission{mission.scoutCompletedMissions === 1 ? "" : "s"}</p>{mission.scoutRating ? <span className="scout-rating">★ {mission.scoutRating.toFixed(1)} <small>({mission.scoutRatingCount})</small></span> : <span className="new-scout">New Scout · not yet rated</span>}</div></article>;
+  return <article className="mission-panel scout-identity-card"><div className="scout-headshot">{mission.scoutHeadshotUrl ? <Image src={mission.scoutHeadshotUrl} alt={`${mission.scoutName} profile photo`} width={76} height={76} unoptimized /> : <span>{mission.scoutName?.slice(0, 1).toUpperCase()}</span>}</div><div><small>Your Scout</small><h2>{mission.scoutName}</h2>{mission.scoutIdentityVerified && <span className="identity-verified"><IconShieldCheck size={15} /> Identity verified</span>}<p>{mission.scoutCompletedMissions} completed mission{mission.scoutCompletedMissions === 1 ? "" : "s"}</p>{mission.scoutRating ? <span className="scout-rating">★ {mission.scoutRating.toFixed(1)} <small>({mission.scoutRatingCount})</small></span> : <span className="new-scout">New Scout · not yet rated</span>}</div></article>;
 }
 
 function LocationStop({ number, label, location, instructions }: { number: string; label: string; location: string; instructions?: string | null }) {

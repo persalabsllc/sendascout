@@ -53,11 +53,31 @@ export const users = pgTable("users", {
   emailNotificationsEnabled: boolean("email_notifications_enabled").notNull().default(true),
   smsNotificationsEnabled: boolean("sms_notifications_enabled").notNull().default(false),
   smsConsentedAt: timestamp("sms_consented_at", { withTimezone: true }),
+  legalVersion: text("legal_version"),
+  legalAcceptedAt: timestamp("legal_accepted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
   uniqueIndex("users_clerk_user_id_idx").on(table.clerkUserId),
   uniqueIndex("users_email_idx").on(table.email),
+]);
+
+export const legalAcceptances = pgTable("legal_acceptances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: userRole("role").notNull(),
+  legalVersion: text("legal_version").notNull(),
+  termsVersion: text("terms_version").notNull(),
+  privacyVersion: text("privacy_version").notNull(),
+  policiesVersion: text("policies_version").notNull(),
+  arbitrationAccepted: boolean("arbitration_accepted").notNull(),
+  electronicRecordsAccepted: boolean("electronic_records_accepted").notNull(),
+  source: text("source").notNull().default("web"),
+  userAgent: text("user_agent"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("legal_acceptances_user_version_idx").on(table.userId, table.legalVersion),
+  index("legal_acceptances_user_idx").on(table.userId),
 ]);
 
 export const scoutProfiles = pgTable("scout_profiles", {
@@ -66,6 +86,11 @@ export const scoutProfiles = pgTable("scout_profiles", {
   status: scoutStatus("status").notNull().default("applicant"),
   backgroundCheck: verificationStatus("background_check").notNull().default("not_started"),
   identityCheck: verificationStatus("identity_check").notNull().default("not_started"),
+  identityProvider: text("identity_provider"),
+  identityVerificationReference: text("identity_verification_reference"),
+  identityVerifiedName: text("identity_verified_name"),
+  identityVerifiedAt: timestamp("identity_verified_at", { withTimezone: true }),
+  identityVerifiedBy: uuid("identity_verified_by").references(() => users.id),
   homeZip: text("home_zip"),
   serviceRadiusMiles: integer("service_radius_miles").notNull().default(25),
   vehicleType: text("vehicle_type"),

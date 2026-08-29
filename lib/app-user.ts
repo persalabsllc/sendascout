@@ -3,10 +3,11 @@ import { eq, or } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
+import { hasCurrentLegalAcceptance } from "@/lib/legal";
 
 export type AppRole = "customer" | "scout" | "admin";
 
-export async function requireAppUser(preferredRole: AppRole = "customer") {
+export async function requireAuthenticatedAppUser(preferredRole: AppRole = "customer") {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
@@ -48,6 +49,12 @@ export async function requireAppUser(preferredRole: AppRole = "customer") {
     .returning();
 
   return created;
+}
+
+export async function requireAppUser(preferredRole: AppRole = "customer") {
+  const user = await requireAuthenticatedAppUser(preferredRole);
+  if (!hasCurrentLegalAcceptance(user)) redirect("/legal/accept");
+  return user;
 }
 
 export async function requireAdminUser() {

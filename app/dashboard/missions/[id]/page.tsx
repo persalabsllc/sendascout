@@ -30,7 +30,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   const [[customer], scoutRows, assignedProfileRows, completedMissionRows, messageRows, resultRows, reviewRows] = await Promise.all([
     db.select().from(users).where(eq(users.id, mission.customerId)).limit(1),
     mission.scoutId ? db.select().from(users).where(eq(users.id, mission.scoutId)).limit(1) : Promise.resolve([]),
-    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
+    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount, identityCheck: scoutProfiles.identityCheck }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
     mission.scoutId ? db.select({ value: count() }).from(missions).where(and(eq(missions.scoutId, mission.scoutId), eq(missions.status, "completed"))) : Promise.resolve([{ value: 0 }]),
     mission.scoutId || role === "admin"
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
@@ -100,6 +100,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       scoutCompletedMissions: completedMissionRows[0]?.value ?? 0,
       scoutRating: assignedProfile?.rating ? Number(assignedProfile.rating) : null,
       scoutRatingCount: assignedProfile?.ratingCount ?? 0,
+      scoutIdentityVerified: assignedProfile?.identityCheck === "clear",
     }}
     messages={messageRows.map((message) => ({
       id: message.id,

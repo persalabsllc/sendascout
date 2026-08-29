@@ -31,6 +31,11 @@ export default async function ControlRoomPage() {
       vehicle: profile.vehicleType ?? "",
       radius: profile.serviceRadiusMiles,
       status: profile.status,
+      identityStatus: profile.identityCheck,
+      identityProvider: profile.identityProvider,
+      identityVerifiedAt: profile.identityVerifiedAt?.toISOString() ?? null,
+      legalVersion: user.legalVersion,
+      legalAcceptedAt: user.legalAcceptedAt?.toISOString() ?? null,
       capabilities: [profile.canSee && "See", profile.canMove && "Move", profile.canMeet && "Meet"].filter(Boolean).join(" / "),
     }))}
     missions={missionRows.map(({ mission, customer }) => ({

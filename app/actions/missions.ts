@@ -3,7 +3,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
-import { missionMessages, missionReviews, missions, missionUpdates, notifications, scoutProfiles } from "@/db/schema";
+import { missionMessages, missionReviews, missions, missionUpdates, notifications, scoutProfiles, users } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
 import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
@@ -316,6 +316,11 @@ export async function confirmMissionComplete(id: string, rating: number, review:
 export async function adminSetScoutStatus(profileId: string, status: "review" | "approved" | "paused" | "rejected"): Promise<Result> {
   try {
     await requireAdminUser();
+    const [existing] = await getDb().select({ identityCheck: scoutProfiles.identityCheck }).from(scoutProfiles).where(eq(scoutProfiles.id, profileId)).limit(1);
+    if (!existing) throw new Error("Scout profile not found.");
+    if (status === "approved" && existing.identityCheck !== "clear") {
+      throw new Error("Identity verification must be completed before this Scout can be approved.");
+    }
     const [profile] = await getDb().update(scoutProfiles).set({
       status,
       approvedAt: status === "approved" ? new Date() : null,
@@ -326,6 +331,30 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to update the Scout." };
+  }
+}
+
+export async function adminRecordScoutIdentity(profileId: string): Promise<Result> {
+  try {
+    const admin = await requireAdminUser();
+    const [profile] = await getDb().select({ id: scoutProfiles.id, userId: scoutProfiles.userId }).from(scoutProfiles).where(eq(scoutProfiles.id, profileId)).limit(1);
+    if (!profile) throw new Error("Scout profile not found.");
+    const [scout] = await getDb().select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, profile.userId)).limit(1);
+    const verifiedName = [scout?.firstName, scout?.lastName].filter(Boolean).join(" ");
+    if (!verifiedName) throw new Error("Add the Scout’s legal name before recording identity verification.");
+    await getDb().update(scoutProfiles).set({
+      identityCheck: "clear",
+      identityProvider: "manual_admin_review",
+      identityVerificationReference: null,
+      identityVerifiedName: verifiedName,
+      identityVerifiedAt: new Date(),
+      identityVerifiedBy: admin.id,
+      updatedAt: new Date(),
+    }).where(eq(scoutProfiles.id, profileId));
+    revalidatePath("/control-room");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Unable to record identity verification." };
   }
 }
 
