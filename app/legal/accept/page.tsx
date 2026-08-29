@@ -12,7 +12,7 @@ export default async function LegalAcceptancePage() {
   if (hasCurrentLegalAcceptance(user)) redirect(user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer");
 
   return <main className="legal-accept-page">
-    <header><Link href="/"><Brand /></Link><span>Agreement version {LEGAL_VERSION}</span></header>
+    <header><Brand href="/" /><span>Agreement version {LEGAL_VERSION}</span></header>
     <section className="legal-accept-card">
       <span className="kicker">Before entering the marketplace</span>
       <h1>Review and accept Send a Scout’s agreements.</h1>
