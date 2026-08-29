@@ -2,10 +2,11 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   IconArrowRight, IconBell, IconCamera, IconCircleCheck, IconClock, IconCoin,
-  IconDashboard, IconMapPin, IconMenu2, IconPlus, IconRoute, IconSettings,
+  IconDashboard, IconMapPin, IconPlus, IconRoute, IconSettings,
   IconShieldCheck, IconTargetArrow, IconUser, IconWallet,
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
+import { MobileDashboardNav } from "./mobile-dashboard-nav";
 
 type Role = "customer" | "scout";
 type MissionKind = "see" | "move" | "meet";
@@ -69,7 +70,7 @@ export function Dashboard({
 
       <section className="dash-main">
         <header className="dash-header">
-          <button aria-label="Open navigation"><IconMenu2 size={21} /></button>
+          <MobileDashboardNav initials={initials} name={userName} role={role} />
           <div><span className="dash-alert"><IconBell size={20} /></span><UserButton /></div>
         </header>
         <div className="dash-content">

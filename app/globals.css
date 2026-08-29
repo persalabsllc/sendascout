@@ -303,6 +303,7 @@ button, input, textarea, select { font: inherit; }
 .dash-header { height: 72px; background: rgba(255,255,255,.94); border-bottom: 1px solid #e3e9e9; padding: 0 34px; display: flex; align-items: center; justify-content: flex-end; }
 .dash-header > button { display: none; }
 .dash-header > div { display: flex; align-items: center; gap: 21px; }
+.mobile-nav-drawer, .mobile-nav-backdrop { display: none; }
 .dash-alert { position: relative; color: #61737c; }
 .dash-alert i { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--coral); border: 2px solid white; right: -1px; top: -2px; }
 .dash-content { width: min(1080px, calc(100% - 56px)); margin: 0 auto; padding: 45px 0 70px; }
@@ -486,6 +487,21 @@ button, input, textarea, select { font: inherit; }
   .dash-sidebar { display: none; }
   .dash-header { justify-content: space-between; padding: 0 20px; }
   .dash-header > button { display: grid; place-items: center; border: 0; background: transparent; color: var(--navy); }
+  .mobile-nav-trigger { width: 44px; height: 44px; margin-left: -10px; border-radius: 12px !important; cursor: pointer; }
+  .mobile-nav-trigger:focus-visible, .mobile-nav-heading button:focus-visible { outline: 3px solid rgba(0,169,149,.28); outline-offset: 2px; }
+  .dash-header > .mobile-nav-backdrop { display: block; position: fixed; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: rgba(7,31,51,.42); z-index: 80; }
+  .mobile-nav-drawer { display: flex; position: fixed; inset: 0 auto 0 0; width: min(84vw, 330px); height: 100dvh; box-sizing: border-box; background: white; padding: 22px 19px; z-index: 81; flex-direction: column; box-shadow: 18px 0 45px rgba(7,31,51,.18); animation: mobile-nav-in .2s ease-out; }
+  .mobile-nav-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 24px; border-bottom: 1px solid #edf0f0; }
+  .mobile-nav-heading .brand-mark { width: 39px; height: 39px; }
+  .mobile-nav-heading > button { width: 42px; height: 42px; border: 0; border-radius: 12px; background: #f1f6f5; color: var(--navy); display: grid; place-items: center; cursor: pointer; }
+  .mobile-nav-drawer nav { display: grid; gap: 7px; padding: 22px 0; }
+  .mobile-nav-drawer nav a, .mobile-nav-bottom > a, .mobile-nav-bottom > button { width: 100%; box-sizing: border-box; border: 0; display: flex; align-items: center; gap: 13px; padding: 13px 14px; border-radius: 11px; background: transparent; color: #61737c; font: inherit; font-size: 14px; font-weight: 760; text-align: left; cursor: pointer; }
+  .mobile-nav-drawer nav a.active { background: #e9f8f5; color: var(--navy); }
+  .mobile-nav-drawer nav a.active svg { color: var(--teal); }
+  .mobile-nav-bottom { margin-top: auto; display: grid; gap: 5px; }
+  .mobile-nav-bottom > button { color: #b75243; }
+  .mobile-nav-bottom .dash-user { margin-top: 10px; }
+  @keyframes mobile-nav-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
   .dash-content { width: min(100% - 28px, 1080px); padding-top: 30px; }
   .dash-welcome { align-items: flex-start; }
   .mission-work-grid { grid-template-columns: 1fr; }
