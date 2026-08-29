@@ -50,6 +50,9 @@ export const users = pgTable("users", {
   state: text("state"),
   zip: text("zip"),
   profileCompletedAt: timestamp("profile_completed_at", { withTimezone: true }),
+  emailNotificationsEnabled: boolean("email_notifications_enabled").notNull().default(true),
+  smsNotificationsEnabled: boolean("sms_notifications_enabled").notNull().default(false),
+  smsConsentedAt: timestamp("sms_consented_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -75,7 +78,9 @@ export const scoutProfiles = pgTable("scout_profiles", {
   verificationConsentedAt: timestamp("verification_consented_at", { withTimezone: true }),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   rating: numeric("rating", { precision: 3, scale: 2 }),
+  ratingCount: integer("rating_count").notNull().default(0),
   completedMissions: integer("completed_missions").notNull().default(0),
+  headshotPath: text("headshot_path"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [uniqueIndex("scout_profiles_user_id_idx").on(table.userId)]);
@@ -140,6 +145,7 @@ export const missions = pgTable("missions", {
   scoutLocationAccuracyMeters: integer("scout_location_accuracy_meters"),
   scoutLocationUpdatedAt: timestamp("scout_location_updated_at", { withTimezone: true }),
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -169,6 +175,21 @@ export const missionMessages = pgTable("mission_messages", {
 }, (table) => [
   index("mission_messages_mission_idx").on(table.missionId),
   index("mission_messages_sender_idx").on(table.senderId),
+]);
+
+export const missionReviews = pgTable("mission_reviews", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  customerId: uuid("customer_id").notNull().references(() => users.id),
+  scoutId: uuid("scout_id").notNull().references(() => users.id),
+  rating: integer("rating").notNull(),
+  review: text("review"),
+  tipCents: integer("tip_cents").notNull().default(0),
+  tipStatus: paymentStatus("tip_status").notNull().default("unpaid"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("mission_reviews_mission_idx").on(table.missionId),
+  index("mission_reviews_scout_idx").on(table.scoutId),
 ]);
 
 export const notifications = pgTable("notifications", {

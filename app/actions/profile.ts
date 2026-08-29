@@ -16,10 +16,11 @@ export type CustomerProfileInput = {
   city: string;
   state: string;
   zip: string;
+  emailNotificationsEnabled: boolean;
 };
 
 export type ProfileResult = { ok: true } | { ok: false; error: string };
-export type ScoutSettingsInput = { homeZip: string; serviceRadiusMiles: number; vehicleType: string; canSee: boolean; canMove: boolean; canMeet: boolean };
+export type ScoutSettingsInput = { homeZip: string; serviceRadiusMiles: number; vehicleType: string; canSee: boolean; canMove: boolean; canMeet: boolean; emailNotificationsEnabled: boolean };
 
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
@@ -41,6 +42,7 @@ export async function saveScoutSettings(input: ScoutSettingsInput): Promise<Prof
       canMeet: input.canMeet,
       updatedAt: new Date(),
     }).where(eq(scoutProfiles.userId, user.id));
+    await getDb().update(users).set({ emailNotificationsEnabled: input.emailNotificationsEnabled, updatedAt: new Date() }).where(eq(users.id, user.id));
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/missions");
     revalidatePath("/dashboard/scout/settings");
@@ -81,6 +83,7 @@ export async function saveCustomerProfile(input: CustomerProfileInput): Promise<
         state: input.state.trim().toUpperCase(),
         zip: input.zip.trim(),
         profileCompletedAt: new Date(),
+        emailNotificationsEnabled: input.emailNotificationsEnabled,
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
@@ -99,5 +102,18 @@ export async function saveCustomerProfile(input: CustomerProfileInput): Promise<
   } catch (error) {
     console.error("Customer profile update failed", error);
     return { ok: false, error: error instanceof Error ? error.message : "We could not save your profile." };
+  }
+}
+
+export async function saveScoutHeadshot(pathname: string): Promise<ProfileResult> {
+  try {
+    const user = await requireAppUser("scout");
+    if (!pathname.startsWith("scout-headshots/upload/") || pathname.includes("..")) throw new Error("That profile photo could not be verified.");
+    await getDb().update(scoutProfiles).set({ headshotPath: pathname, updatedAt: new Date() }).where(eq(scoutProfiles.userId, user.id));
+    revalidatePath("/dashboard/scout");
+    revalidatePath("/dashboard/scout/settings");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "We could not save your profile photo." };
   }
 }

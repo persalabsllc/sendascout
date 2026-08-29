@@ -3,9 +3,9 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/db";
-import { missionMessages, missions, missionUpdates, notifications, scoutProfiles } from "@/db/schema";
+import { missionMessages, missionReviews, missions, missionUpdates, notifications, scoutProfiles } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
-import { alertEligibleScouts } from "@/lib/notifications";
+import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
 import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-verification";
@@ -49,16 +49,7 @@ export async function claimMission(id: string): Promise<Result> {
     if (!claimed) throw new Error("Another Scout claimed this mission first.");
     await db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "claimed", message: "A Scout claimed this mission." });
     const claimedMission = await getMission(id);
-    await db.insert(notifications).values({
-      recipientUserId: claimedMission.customerId,
-      missionId: id,
-      channel: "in_app",
-      status: "sent",
-      kind: "mission_claimed",
-      title: "Your mission has a Scout",
-      body: "A Scout accepted your mission. Open it to follow progress and send a private message.",
-      sentAt: new Date(),
-    });
+    await notifyUser({ recipientUserId: claimedMission.customerId, missionId: id, kind: "mission_claimed", title: "Your mission has a Scout", body: "A Scout accepted your mission. Open it to follow progress and send a private message.", actionLabel: "Track mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -116,16 +107,7 @@ export async function updateMissionStatus(id: string, nextStatus: MissionStatus)
       updatedAt: new Date(),
     }).where(eq(missions.id, id));
     await getDb().insert(missionUpdates).values({ missionId: id, authorId: user.id, status: nextStatus });
-    await getDb().insert(notifications).values({
-      recipientUserId: mission.customerId,
-      missionId: id,
-      channel: "in_app",
-      status: "sent",
-      kind: "status_update",
-      title: "Mission status updated",
-      body: statusLabel(mission.type, nextStatus),
-      sentAt: new Date(),
-    });
+    await notifyUser({ recipientUserId: mission.customerId, missionId: id, kind: "status_update", title: "Mission status updated", body: statusLabel(mission.type, nextStatus), actionLabel: "View live mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -196,20 +178,12 @@ export async function submitMissionResults(id: string, summary: string, mediaUrl
         scoutLongitude: null,
         scoutLocationAccuracyMeters: null,
         scoutLocationUpdatedAt: null,
-        updatedAt: new Date(),
+        submittedAt: now,
+        updatedAt: now,
       }).where(eq(missions.id, id));
-    const customerNotification = db.insert(notifications).values({
-        recipientUserId: mission.customerId,
-        missionId: id,
-        channel: "in_app",
-        status: "sent",
-        kind: "results_submitted",
-        title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready",
-        body: "Your Scout submitted notes and media for your review.",
-        sentAt: new Date(),
-      });
-    if (mediaUpdate) await db.batch([resultUpdate, mediaUpdate, missionUpdate, customerNotification]);
-    else await db.batch([resultUpdate, missionUpdate, customerNotification]);
+    if (mediaUpdate) await db.batch([resultUpdate, mediaUpdate, missionUpdate]);
+    else await db.batch([resultUpdate, missionUpdate]);
+    await notifyUser({ recipientUserId: mission.customerId, missionId: id, kind: "results_submitted", title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready", body: "Your Scout submitted the mission results. Review them and confirm completion within 24 hours.", actionLabel: "Review results", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -276,16 +250,7 @@ export async function approveMeetExtension(id: string): Promise<Result> {
       maximumScoutPayoutCents: maximum.scout,
       updatedAt: new Date(),
     }).where(eq(missions.id, id));
-    if (mission.scoutId) await db.insert(notifications).values({
-      recipientUserId: mission.scoutId,
-      missionId: id,
-      channel: "in_app",
-      status: "sent",
-      kind: "appointment_extended",
-      title: "Customer approved more appointment time",
-      body: `The verified appointment limit is now ${authorizedMinutes / 60} hours.`,
-      sentAt: new Date(),
-    });
+    if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "appointment_extended", title: "Customer approved more appointment time", body: `The verified appointment limit is now ${authorizedMinutes / 60} hours.`, actionLabel: "View appointment", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -304,16 +269,7 @@ export async function sendMissionMessage(id: string, body: string): Promise<Resu
     if (cleanBody.length > 1500) throw new Error("Messages are limited to 1,500 characters.");
     await getDb().insert(missionMessages).values({ missionId: id, senderId: user.id, body: cleanBody });
     const recipientUserId = user.id === mission.customerId ? mission.scoutId : mission.customerId;
-    await getDb().insert(notifications).values({
-      recipientUserId,
-      missionId: id,
-      channel: "in_app",
-      status: "sent",
-      kind: "new_message",
-      title: "New mission message",
-      body: "You received a private message in Send a Scout.",
-      sentAt: new Date(),
-    });
+    await notifyUser({ recipientUserId, missionId: id, kind: "new_message", title: "New mission message", body: "You received a private message in Send a Scout. Open the mission to reply without sharing phone numbers.", actionLabel: "Read message", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -321,21 +277,28 @@ export async function sendMissionMessage(id: string, body: string): Promise<Resu
   }
 }
 
-export async function confirmMissionComplete(id: string): Promise<Result> {
+export async function confirmMissionComplete(id: string, rating: number, review: string, tipCents: number): Promise<Result> {
   try {
     const user = await requireAppUser("customer");
     const mission = await getMission(id);
     if (mission.customerId !== user.id || mission.status !== "submitted") throw new Error("This mission is not ready for confirmation.");
+    if (!mission.scoutId) throw new Error("This mission does not have an assigned Scout.");
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new Error("Choose a rating from 1 to 5 stars.");
+    const cleanReview = review.trim();
+    if (cleanReview.length > 1500) throw new Error("Reviews are limited to 1,500 characters.");
+    if (![0, 300, 500, 1000].includes(tipCents)) throw new Error("Choose one of the available tip amounts.");
     const db = getDb();
+    const [profile] = await db.select({ rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1);
+    if (!profile) throw new Error("The assigned Scout profile could not be found.");
+    const oldAverage = Number(profile.rating ?? 0);
+    const nextCount = profile.ratingCount + 1;
+    const nextAverage = ((oldAverage * profile.ratingCount) + rating) / nextCount;
     const missionUpdate = db.update(missions).set({ status: "completed", completedAt: new Date(), locationSharingActive: false, scoutLatitude: null, scoutLongitude: null, scoutLocationAccuracyMeters: null, scoutLocationUpdatedAt: null, updatedAt: new Date() }).where(eq(missions.id, id));
     const completionUpdate = db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "completed", message: "Customer confirmed completion." });
-    if (mission.scoutId) {
-      const scoutUpdate = db.update(scoutProfiles).set({
-          completedMissions: sql`${scoutProfiles.completedMissions} + 1`,
-          updatedAt: new Date(),
-        }).where(eq(scoutProfiles.userId, mission.scoutId));
-      await db.batch([missionUpdate, completionUpdate, scoutUpdate]);
-    } else await db.batch([missionUpdate, completionUpdate]);
+    const reviewInsert = db.insert(missionReviews).values({ missionId: id, customerId: user.id, scoutId: mission.scoutId, rating, review: cleanReview || null, tipCents });
+    const scoutUpdate = db.update(scoutProfiles).set({ completedMissions: sql`${scoutProfiles.completedMissions} + 1`, rating: nextAverage.toFixed(2), ratingCount: nextCount, updatedAt: new Date() }).where(eq(scoutProfiles.userId, mission.scoutId));
+    await db.batch([missionUpdate, completionUpdate, reviewInsert, scoutUpdate]);
+    await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_confirmed", title: "Mission confirmed", body: `The customer confirmed completion and left a ${rating}-star rating.${tipCents ? ` A ${`$${(tipCents / 100).toFixed(0)}`} tip will be processed when payments are active.` : ""}`, actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -346,11 +309,12 @@ export async function confirmMissionComplete(id: string): Promise<Result> {
 export async function adminSetScoutStatus(profileId: string, status: "review" | "approved" | "paused" | "rejected"): Promise<Result> {
   try {
     await requireAdminUser();
-    await getDb().update(scoutProfiles).set({
+    const [profile] = await getDb().update(scoutProfiles).set({
       status,
       approvedAt: status === "approved" ? new Date() : null,
       updatedAt: new Date(),
-    }).where(eq(scoutProfiles.id, profileId));
+    }).where(eq(scoutProfiles.id, profileId)).returning({ userId: scoutProfiles.userId });
+    if (profile && status === "approved") await notifyUser({ recipientUserId: profile.userId, kind: "scout_approved", title: "Your Scout application is approved", body: "You can now review and claim missions within your selected delivery zone.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
     revalidatePath("/control-room");
     return { ok: true };
   } catch (error) {
@@ -414,6 +378,10 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
     await getDb().insert(missionUpdates).values({ missionId: id, authorId: admin.id, status, message: status === "draft" ? "Control Room pulled this mission from the Scout board." : `Control Room changed mission to ${status}.` });
     if (status === "draft") await getDb().update(notifications).set({ readAt: new Date() }).where(and(eq(notifications.missionId, id), eq(notifications.kind, "new_mission")));
     if (status === "open") await alertEligibleScouts(id);
+    if (status === "cancelled") {
+      await notifyUser({ recipientUserId: mission.customerId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled. Any eligible payment adjustment will follow the cancellation policy.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
+      if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled and removed from your active work.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
+    }
     refreshMission(id);
     return { ok: true };
   } catch (error) {

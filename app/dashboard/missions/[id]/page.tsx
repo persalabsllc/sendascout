@@ -2,7 +2,7 @@ import { and, asc, eq, or, isNotNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
-import { missionMessages, missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
+import { missionMessages, missionReviews, missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
@@ -27,9 +27,10 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     canClaim = true;
   } else notFound();
 
-  const [[customer], scoutRows, messageRows, resultRows] = await Promise.all([
+  const [[customer], scoutRows, assignedProfileRows, messageRows, resultRows, reviewRows] = await Promise.all([
     db.select().from(users).where(eq(users.id, mission.customerId)).limit(1),
     mission.scoutId ? db.select().from(users).where(eq(users.id, mission.scoutId)).limit(1) : Promise.resolve([]),
+    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, completedMissions: scoutProfiles.completedMissions, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
     mission.scoutId || role === "admin"
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
           .from(missionMessages).where(eq(missionMessages.missionId, mission.id)).orderBy(asc(missionMessages.createdAt))
@@ -38,8 +39,10 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       .from(missionUpdates)
       .where(and(eq(missionUpdates.missionId, mission.id), or(eq(missionUpdates.status, "submitted"), isNotNull(missionUpdates.mediaUrl))))
       .orderBy(asc(missionUpdates.createdAt)),
+    db.select({ rating: missionReviews.rating, review: missionReviews.review, tipCents: missionReviews.tipCents }).from(missionReviews).where(eq(missionReviews.missionId, mission.id)).limit(1),
   ]);
   const scout = scoutRows[0];
+  const assignedProfile = assignedProfileRows[0];
   const showFullAddress = role !== "scout" || mission.scoutId === user.id;
   const pickup = showFullAddress
     ? formatLocation(mission.pickupName, mission.addressLine1, mission.addressLine2, mission.city, mission.state, mission.zip)
@@ -92,6 +95,10 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       directionsUrl: mapDirectionsUrl(mission.type, pickupMapLatitude, pickupMapLongitude, dropoffMapLatitude, dropoffMapLongitude),
       customerName: customer?.firstName || "Customer",
       scoutName: scout?.firstName || null,
+      scoutHeadshotUrl: scout && assignedProfile?.headshotPath ? `/api/scout-headshot?scoutId=${encodeURIComponent(scout.id)}` : null,
+      scoutCompletedMissions: assignedProfile?.completedMissions ?? 0,
+      scoutRating: assignedProfile?.rating ? Number(assignedProfile.rating) : null,
+      scoutRatingCount: assignedProfile?.ratingCount ?? 0,
     }}
     messages={messageRows.map((message) => ({
       id: message.id,
@@ -105,6 +112,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       mediaUrls: resultRows.flatMap((item) => item.mediaUrl ? [privateMediaUrl(mission.id, item.mediaUrl)] : []),
       submittedAt: resultRows[0]?.createdAt.toISOString() ?? null,
     }}
+    review={reviewRows[0] ?? null}
   />;
 }
 

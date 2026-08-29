@@ -147,7 +147,7 @@ export default async function Home() {
       <footer className="footer shell">
         <Brand />
         <p>© 2026 Send a Scout. Your trusted local presence, on demand.</p>
-        <div><a href="mailto:hello@sendascout.com">Contact</a><a href="#">Terms</a><a href="#">Privacy</a></div>
+        <div><a href="mailto:hello@sendascout.com">Contact</a><Link href="/policies">Policies</Link><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></div>
       </footer>
     </main>
   );

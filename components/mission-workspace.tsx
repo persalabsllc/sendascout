@@ -48,17 +48,25 @@ type MissionView = {
   directionsUrl?: string | null;
   customerName: string;
   scoutName?: string | null;
+  scoutHeadshotUrl?: string | null;
+  scoutCompletedMissions: number;
+  scoutRating?: number | null;
+  scoutRatingCount: number;
 };
 type MessageView = { id: string; body: string; sender: string; mine: boolean; createdAt: string };
 type ResultView = { summary: string | null; mediaUrls: string[]; submittedAt: string | null };
+type ReviewView = { rating: number; review: string | null; tipCents: number } | null;
 
-export function MissionWorkspace({ role, mission, messages, results, canClaim }: { role: "customer" | "scout" | "admin"; mission: MissionView; messages: MessageView[]; results: ResultView; canClaim: boolean }) {
+export function MissionWorkspace({ role, mission, messages, results, review, canClaim }: { role: "customer" | "scout" | "admin"; mission: MissionView; messages: MessageView[]; results: ResultView; review: ReviewView; canClaim: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [resultSummary, setResultSummary] = useState("");
   const [resultFiles, setResultFiles] = useState<File[]>([]);
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState("");
+  const [tipCents, setTipCents] = useState(0);
   const [tracking, setTracking] = useState(mission.locationSharingActive);
   const [clock, setClock] = useState<number | null>(null);
   const lastLocationSent = useRef(0);
@@ -210,10 +218,12 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
 
             {(results.summary || results.mediaUrls.length > 0) && <ResultPanel results={results} />}
 
-            {role === "customer" && mission.status === "submitted" && <article className="mission-panel completion-panel"><IconCheck size={28} /><div><h2>Scout marked this mission complete</h2><p>Review the result, then confirm completion.</p></div><button className="button" disabled={pending} onClick={() => run(() => confirmMissionComplete(mission.id))}>Confirm completion</button></article>}
+            {role === "customer" && mission.status === "submitted" && <article className="mission-panel completion-panel review-panel"><IconCheck size={28} /><div><h2>Confirm and rate your Scout</h2><p>Review the result, rate the service and optionally leave a tip.</p><div className="star-picker" aria-label="Scout rating">{[1, 2, 3, 4, 5].map((star) => <button type="button" aria-label={`${star} star${star === 1 ? "" : "s"}`} aria-pressed={rating === star} className={rating >= star ? "selected" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><textarea aria-label="Optional Scout review" maxLength={1500} rows={3} placeholder="Optional note about your experience" value={reviewText} onChange={(event) => setReviewText(event.target.value)} /><div className="tip-picker"><span>Optional tip</span>{[0, 300, 500, 1000].map((amount) => <button type="button" className={tipCents === amount ? "selected" : ""} key={amount} onClick={() => setTipCents(amount)}>{amount ? money(amount) : "No tip"}</button>)}</div><small>Tips are recorded during testing and will be charged only after secure payments are activated.</small></div><button className="button" disabled={pending || rating === 0} onClick={() => run(() => confirmMissionComplete(mission.id, rating, reviewText, tipCents))}>Confirm completion</button></article>}
+            {review && <article className="mission-panel customer-review-panel"><div><span className="review-stars">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span><h2>Customer rating</h2>{review.review && <p>{review.review}</p>}{review.tipCents > 0 && <small>{money(review.tipCents)} tip selected</small>}</div></article>}
           </section>
 
           <aside className="mission-column">
+            {role === "customer" && assigned && <ScoutIdentityCard mission={mission} />}
             {role === "scout" ? <article className="mission-panel tracking-panel mission-map-panel">
               <div className="panel-heading"><IconRoute size={22} /><div><h2>{mission.type === "move" ? "Pickup-to-drop-off map" : mission.type === "meet" ? "Meeting location map" : "Inspection location map"}</h2><p>{mission.type === "move" ? "Plan the verified driving route" : "See where the mission takes place"}</p></div></div>
               <Image className="mission-map-image" src={missionMapUrl} alt={mission.type === "move" ? "Pickup-to-drop-off driving route" : "Mission location"} width={900} height={480} sizes="(max-width: 760px) 100vw, 42vw" unoptimized />
@@ -238,6 +248,10 @@ export function MissionWorkspace({ role, mission, messages, results, canClaim }:
       </div>
     </main>
   );
+}
+
+function ScoutIdentityCard({ mission }: { mission: MissionView }) {
+  return <article className="mission-panel scout-identity-card"><div className="scout-headshot">{mission.scoutHeadshotUrl ? <Image src={mission.scoutHeadshotUrl} alt={`${mission.scoutName} profile photo`} width={76} height={76} unoptimized /> : <span>{mission.scoutName?.slice(0, 1).toUpperCase()}</span>}</div><div><small>Your Scout</small><h2>{mission.scoutName}</h2><p>{mission.scoutCompletedMissions} completed mission{mission.scoutCompletedMissions === 1 ? "" : "s"}</p>{mission.scoutRating ? <span className="scout-rating">★ {mission.scoutRating.toFixed(1)} <small>({mission.scoutRatingCount})</small></span> : <span className="new-scout">New Scout · not yet rated</span>}</div></article>;
 }
 
 function LocationStop({ number, label, location, instructions }: { number: string; label: string; location: string; instructions?: string | null }) {
@@ -278,7 +292,7 @@ function MeetTimerPanel({ role, mission, clock, pending, extend }: { role: "cust
 }
 
 function ResultPanel({ results }: { results: ResultView }) {
-  return <article className="mission-panel result-panel"><div className="panel-heading"><IconCheck size={22} /><div><h2>Mission results</h2><p>{results.submittedAt ? `Submitted ${new Date(results.submittedAt).toLocaleString()}` : "Submitted by the Scout"}</p></div></div>{results.summary && <p className="result-summary">{results.summary}</p>}{results.mediaUrls.length > 0 && <div className="result-gallery">{results.mediaUrls.map((url) => isVideo(url) ? <video controls preload="metadata" src={url} key={url} /> : <a href={url} target="_blank" rel="noreferrer" key={url}><img loading="lazy" src={url} alt="Scout mission result" /></a>)}</div>}</article>;
+  return <article className="mission-panel result-panel"><div className="panel-heading"><IconCheck size={22} /><div><h2>Mission results</h2><p>{results.submittedAt ? `Submitted ${new Date(results.submittedAt).toLocaleString()}` : "Submitted by the Scout"}</p></div></div>{results.summary && <p className="result-summary">{results.summary}</p>}{results.mediaUrls.length > 0 && <div className="result-gallery">{results.mediaUrls.map((url) => isVideo(url) ? <video controls preload="metadata" src={url} key={url} /> : <a href={url} target="_blank" rel="noreferrer" key={url}><Image src={url} alt="Scout mission result" width={720} height={540} unoptimized /></a>)}</div>}</article>;
 }
 
 function statusLabel(type: MissionView["type"], status: Status) {

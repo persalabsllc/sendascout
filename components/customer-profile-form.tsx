@@ -52,6 +52,7 @@ export function CustomerProfileForm({ initialValue, nextPath }: { initialValue: 
             <Field label="State" autoComplete="address-level1" maxLength={2} value={value.state} onChange={(event) => set("state", event.target.value.toUpperCase())} />
             <Field label="ZIP code" inputMode="numeric" autoComplete="postal-code" value={value.zip} onChange={(event) => set("zip", event.target.value)} />
           </div>
+          <label className="check notification-check"><input type="checkbox" checked={value.emailNotificationsEnabled} onChange={(event) => set("emailNotificationsEnabled", event.target.checked)} /><span><strong>Email mission updates</strong><small>Receive Scout acceptance, progress and results alerts at your account email.</small></span></label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="profile-submit"><button className="button" type="submit" disabled={isPending}>{isPending ? "Saving…" : "Save and continue"}<IconArrowRight size={19} /></button></div>
         </form>
