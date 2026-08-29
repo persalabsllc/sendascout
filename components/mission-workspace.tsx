@@ -13,6 +13,7 @@ import {
   approveMeetExtension, claimMission, confirmMissionComplete, sendMissionMessage, setLocationSharing,
   submitMissionResults, updateMissionLocation, updateMissionStatus,
 } from "@/app/actions/missions";
+import { formatEasternDateTime } from "@/lib/time";
 
 type Status = "draft" | "open" | "claimed" | "en_route" | "onsite" | "en_route_pickup" | "at_pickup" | "en_route_dropoff" | "at_dropoff" | "submitted" | "completed" | "cancelled" | "disputed";
 type MissionView = {
@@ -69,6 +70,7 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
   const [tipCents, setTipCents] = useState(0);
   const [tracking, setTracking] = useState(mission.locationSharingActive);
   const [clock, setClock] = useState<number | null>(null);
+  const [scheduleClock, setScheduleClock] = useState<number | null>(null);
   const lastLocationSent = useRef(0);
   const assigned = Boolean(mission.scoutName);
 
@@ -103,6 +105,14 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, [mission.billableEndedAt, mission.billableStartedAt]);
+
+  useEffect(() => {
+    if (role !== "scout" || mission.type !== "meet" || !mission.scheduledFor) return;
+    const tick = () => setScheduleClock(Date.now());
+    tick();
+    const timer = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(timer);
+  }, [mission.scheduledFor, mission.type, role]);
 
   function run(action: () => Promise<{ ok: true } | { ok: false; error: string }>) {
     setError("");
@@ -173,6 +183,7 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
   }
 
   const next = nextStatus(mission.type, mission.status);
+  const actionAvailability = meetActionAvailability(mission, next, scheduleClock);
   const scoutLocationMapUrl = mission.latitude != null && mission.longitude != null ? approximateMapUrl(mission.latitude, mission.longitude) : null;
   const missionMapUrl = `/api/mission-map?missionId=${encodeURIComponent(mission.id)}`;
   return (
@@ -194,7 +205,7 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
               {mission.type === "move" && <div className="mission-instructions"><strong>Vehicle requirement</strong><p>{mission.largeItem ? "Larger item — SUV, van or pickup truck requested" : "Small item — fits in a car or trunk"}</p></div>}
               {mission.type === "move" && <div className="mission-instructions"><strong>{mission.routeSource === "google" ? "Locked driving route" : "Route verification"}</strong><p>{mission.routeDistanceMeters ? `${routeMiles(mission.routeDistanceMeters)} road miles · approximately ${routeDuration(mission.routeDurationSeconds)}` : "Exact road mileage will be locked before this mission is released to Scouts."}</p></div>}
               <div className="mission-instructions"><strong>Mission instructions</strong><p>{mission.instructions}</p></div>
-              {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {new Date(mission.scheduledFor).toLocaleString()}</p>}
+              {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {formatEasternDateTime(mission.scheduledFor)}</p>}
             </article>
 
             {canClaim && <article className="mission-panel claim-panel"><IconShieldCheck size={28} /><div><h2>Ready to take this mission?</h2><p>{mission.type === "meet" && mission.maximumScoutPayoutCents && mission.maximumScoutPayoutCents > mission.scoutPayoutCents ? `${money(mission.scoutPayoutCents)} guaranteed first hour · up to ${money(mission.maximumScoutPayoutCents)} currently authorized` : "You’ll receive the full address and private customer chat after claiming."}</p></div><button className="button" disabled={pending} onClick={() => run(() => claimMission(mission.id))}>Claim for {money(mission.scoutPayoutCents)}</button></article>}
@@ -203,7 +214,8 @@ export function MissionWorkspace({ role, mission, messages, results, review, can
 
             {role === "scout" && assigned && !["submitted", "completed", "cancelled", "disputed"].includes(mission.status) && <article className="mission-panel action-panel">
               <div><h2>Scout controls</h2><p>Update the customer as you move through the mission.</p></div>
-              {next && <button className="button" disabled={pending} onClick={() => run(() => updateMissionStatus(mission.id, next.status))}>{next.label}</button>}
+              {next && <button className="button" disabled={pending || !actionAvailability.available} onClick={() => run(() => updateMissionStatus(mission.id, next.status))}>{actionAvailability.label ?? next.label}</button>}
+              {actionAvailability.note && <small>{actionAvailability.note}</small>}
               <button className={`tracking-button ${tracking ? "tracking-on" : ""}`} disabled={pending} onClick={toggleTracking}><IconNavigation size={18} /> {tracking ? "Stop location sharing" : "Start live location sharing"}</button>
               <small>Location is shared only during this active mission and is removed when sharing stops.</small>
             </article>}
@@ -284,7 +296,7 @@ function MeetTimerPanel({ role, mission, clock, pending, extend }: { role: "cust
   return <article className="mission-panel timer-panel">
     <div className="panel-heading"><IconClock size={22} /><div><h2>Verified appointment time</h2><p>Server-controlled billing with onsite GPS verification</p></div></div>
     <div className="timer-display"><small>{mission.billableEndedAt ? "Final verified time" : mission.billableStartedAt ? "Verified timer running" : "Timer has not started"}</small><strong>{formatElapsed(elapsedSeconds)}</strong><span>{mission.meetAuthorizedMinutes / 60} hour{mission.meetAuthorizedMinutes === 60 ? "" : "s"} authorized · {cap} maximum</span></div>
-    {!mission.billableStartedAt && <p className="timer-note">The timer starts only after the scheduled time, current GPS confirms the Scout is onsite, and the Scout taps verified check-in. Travel and early arrival do not count.</p>}
+    {!mission.billableStartedAt && <p className="timer-note">Verified check-in opens five minutes before the appointment. The timer starts only after current GPS confirms the Scout is onsite and the Scout checks in; travel time does not count.</p>}
     {mission.billableStartedAt && !mission.billableEndedAt && <p className="timer-note">Only time backed by recent onsite location heartbeats counts. Earnings stop automatically at the authorized limit.</p>}
     {mission.billableEndedAt && <p className="timer-note">Customer charged for {mission.chargedMinutes ?? 60} minutes. Actual verified presence: {mission.billableMinutes ?? 0} minutes.</p>}
     {role === "customer" && mission.status === "onsite" && mission.meetAuthorizedMinutes < 480 && <button className="button button-small" disabled={pending} onClick={extend}>Authorize one additional hour</button>}
@@ -316,3 +328,15 @@ function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1
 function routeMiles(meters: number) { return Math.max(1, Math.ceil(meters / 1609.344)); }
 function routeDuration(seconds?: number | null) { if (!seconds) return "route time unavailable"; const minutes = Math.max(1, Math.round(seconds / 60)); return minutes >= 60 ? `${Math.floor(minutes / 60)} hr ${minutes % 60} min` : `${minutes} min`; }
 function formatElapsed(seconds: number) { const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const remaining = seconds % 60; return [hours, minutes, remaining].map((value) => String(value).padStart(2, "0")).join(":"); }
+
+function meetActionAvailability(mission: MissionView, next: ReturnType<typeof nextStatus>, now: number | null) {
+  if (mission.type !== "meet" || !next || !mission.scheduledFor) return { available: true, label: null, note: null };
+  const scheduled = new Date(mission.scheduledFor).getTime();
+  const opensAt = next.status === "en_route" ? scheduled - 30 * 60_000 : next.status === "onsite" ? scheduled - 5 * 60_000 : null;
+  if (opensAt === null) return { available: true, label: null, note: null };
+  const action = next.status === "en_route" ? "Start trip" : "Check in";
+  if (now === null || now < opensAt) {
+    return { available: false, label: `${action} available at ${formatEasternDateTime(new Date(opensAt))}`, note: next.status === "en_route" ? "Travel status opens 30 minutes before the appointment." : "Verified onsite check-in opens five minutes before the appointment." };
+  }
+  return { available: true, label: null, note: null };
+}

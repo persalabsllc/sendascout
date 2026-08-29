@@ -9,6 +9,7 @@ import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
 import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-verification";
+import { formatEasternDateTime } from "@/lib/time";
 
 type MissionStatus = typeof missions.$inferSelect.status;
 type Result = { ok: true } | { ok: false; error: string };
@@ -77,14 +78,20 @@ export async function updateMissionStatus(id: string, nextStatus: MissionStatus)
 
     const terminal = nextStatus === "submitted";
     const now = new Date();
+    if (mission.type === "meet") {
+      if (!mission.scheduledFor) throw new Error("This appointment does not have a scheduled start time.");
+      const scheduledMs = mission.scheduledFor.getTime();
+      if (nextStatus === "en_route" && now.getTime() < scheduledMs - 30 * 60_000) {
+        throw new Error(`Travel status opens 30 minutes before the appointment, at ${formatEasternDateTime(new Date(scheduledMs - 30 * 60_000))}.`);
+      }
+      if (nextStatus === "onsite" && now.getTime() < scheduledMs - 5 * 60_000) {
+        throw new Error(`Verified check-in opens five minutes before the appointment, at ${formatEasternDateTime(new Date(scheduledMs - 5 * 60_000))}.`);
+      }
+    }
     let verifiedArrival: ReturnType<typeof verifyScoutAtLocation> | null = null;
     if (nextStatus === "at_pickup" && mission.pickupLatitude && mission.pickupLongitude) verifiedArrival = verifyScoutAtLocation(mission, mission.pickupLatitude, mission.pickupLongitude);
     if (nextStatus === "at_dropoff" && mission.dropoffLatitude && mission.dropoffLongitude) verifiedArrival = verifyScoutAtLocation(mission, mission.dropoffLatitude, mission.dropoffLongitude);
     if (nextStatus === "onsite" && mission.pickupLatitude && mission.pickupLongitude) {
-      if (mission.type === "meet") {
-        if (!mission.scheduledFor) throw new Error("This appointment does not have a scheduled start time.");
-        if (now < mission.scheduledFor) throw new Error(`Billable time cannot begin before ${mission.scheduledFor.toLocaleString()}.`);
-      }
       verifiedArrival = verifyScoutAtLocation(mission, mission.pickupLatitude, mission.pickupLongitude);
     }
     await getDb().update(missions).set({

@@ -7,6 +7,7 @@ import { missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pricing";
 import { alertEligibleScouts } from "@/lib/notifications";
+import { easternLocalDateTimeToUtc } from "@/lib/time";
 
 export type MissionInput = {
   type: "see" | "move" | "meet";
@@ -116,7 +117,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         dropoffZip: input.type === "move" ? input.dropoffZip.trim() : null,
         deliveryInstructions: input.type === "move" ? input.deliveryInstructions.trim() || null : null,
         largeItem: input.type === "move" && input.largeItem,
-        scheduledFor: input.scheduledFor ? new Date(input.scheduledFor) : null,
+        scheduledFor: input.scheduledFor ? easternLocalDateTimeToUtc(input.scheduledFor) : null,
         pickupLatitude: amount.pickupCoordinates?.latitude.toFixed(6) ?? null,
         pickupLongitude: amount.pickupCoordinates?.longitude.toFixed(6) ?? null,
         dropoffLatitude: amount.dropoffCoordinates?.latitude.toFixed(6) ?? null,

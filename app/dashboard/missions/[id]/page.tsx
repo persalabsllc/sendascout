@@ -1,4 +1,4 @@
-import { and, asc, eq, or, isNotNull } from "drizzle-orm";
+import { and, asc, count, eq, or, isNotNull } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
@@ -27,10 +27,11 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     canClaim = true;
   } else notFound();
 
-  const [[customer], scoutRows, assignedProfileRows, messageRows, resultRows, reviewRows] = await Promise.all([
+  const [[customer], scoutRows, assignedProfileRows, completedMissionRows, messageRows, resultRows, reviewRows] = await Promise.all([
     db.select().from(users).where(eq(users.id, mission.customerId)).limit(1),
     mission.scoutId ? db.select().from(users).where(eq(users.id, mission.scoutId)).limit(1) : Promise.resolve([]),
-    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, completedMissions: scoutProfiles.completedMissions, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
+    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
+    mission.scoutId ? db.select({ value: count() }).from(missions).where(and(eq(missions.scoutId, mission.scoutId), eq(missions.status, "completed"))) : Promise.resolve([{ value: 0 }]),
     mission.scoutId || role === "admin"
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
           .from(missionMessages).where(eq(missionMessages.missionId, mission.id)).orderBy(asc(missionMessages.createdAt))
@@ -96,7 +97,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       customerName: customer?.firstName || "Customer",
       scoutName: scout?.firstName || null,
       scoutHeadshotUrl: scout && assignedProfile?.headshotPath ? `/api/scout-headshot?scoutId=${encodeURIComponent(scout.id)}` : null,
-      scoutCompletedMissions: assignedProfile?.completedMissions ?? 0,
+      scoutCompletedMissions: completedMissionRows[0]?.value ?? 0,
       scoutRating: assignedProfile?.rating ? Number(assignedProfile.rating) : null,
       scoutRatingCount: assignedProfile?.ratingCount ?? 0,
     }}
