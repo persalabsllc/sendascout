@@ -46,6 +46,9 @@ button, input, textarea, select { font: inherit; }
 .hero h1 em:after { content: ""; position: absolute; height: 7px; background: var(--teal); left: 2px; right: 0; bottom: -8px; border-radius: 100%; transform: rotate(-1deg); }
 .hero-lede { font-size: 20px; line-height: 1.65; color: var(--muted); max-width: 620px; }
 .hero-actions { display: flex; gap: 13px; margin-top: 33px; }
+.returning-login { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 15px; color: #788990; font-size: 12px; }
+.returning-login a { color: var(--navy); font-weight: 800; }
+.returning-login a:hover { color: var(--coral); }
 .trust-row { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 29px; font-size: 13px; color: #526873; font-weight: 700; }
 .trust-row span { display: inline-flex; align-items: center; gap: 7px; }
 .trust-row svg { color: var(--teal); }
@@ -215,6 +218,15 @@ button, input, textarea, select { font: inherit; }
 /* Authentication */
 .auth-page { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; padding: 35px 20px; background: radial-gradient(circle at 50% 15%, #e7faf6, transparent 34%), var(--cream); }
 .auth-page .brand { color: var(--navy); }
+.role-access-page { min-height: 100vh; padding: 42px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; background: radial-gradient(circle at 50% 15%, #e7faf6, transparent 34%), var(--cream); }
+.role-access-card { width: min(560px, 100%); padding: 46px; border: 1px solid #e4ebeb; border-radius: 27px; background: white; text-align: center; box-shadow: 0 22px 65px rgba(8,43,69,.08); }
+.access-icon { width: 68px; height: 68px; display: grid; place-items: center; margin: 0 auto 22px; border-radius: 20px; color: #008f83; background: #dcf8f3; }
+.role-access-card h1 { margin: 10px 0 14px; color: var(--navy); font-size: 36px; line-height: 1.08; letter-spacing: -1.7px; }
+.role-access-card > p { margin: 0 auto 26px; max-width: 440px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.role-access-actions { display: grid; gap: 10px; }
+.role-access-card > small { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 20px; color: #75868d; font-size: 10px; font-weight: 700; }
+.role-access-card > small svg { color: var(--teal); }
+.back-home-link { color: #637780; font-size: 12px; font-weight: 800; }
 
 @media (max-width: 900px) {
   .site-header nav { display: none; }
@@ -243,6 +255,9 @@ button, input, textarea, select { font: inherit; }
   .hero h1 { font-size: 48px; letter-spacing: -3px; }
   .hero-lede { font-size: 17px; }
   .hero-actions { flex-direction: column; }
+  .returning-login { justify-content: center; }
+  .role-access-card { padding: 36px 22px; }
+  .role-access-card h1 { font-size: 31px; }
   .trust-row { flex-direction: column; gap: 10px; align-items: center; }
   .mission-visual { height: 420px; border-radius: 28px; }
   .active-card { width: 88%; padding: 18px; }

@@ -49,8 +49,10 @@ export default async function Home() {
           <a href="#missions">What Scouts do</a>
         </nav>
         <div className="header-actions">
-          <Link className="text-link" href={userId ? "/dashboard" : "/sign-in"}>{userId ? "Dashboard" : "Sign in"}</Link>
-          <Link className="text-link scout-header-link" href="/scout">Become a Scout</Link>
+          {userId ? <Link className="text-link" href="/dashboard">Dashboard</Link> : <>
+            <Link className="text-link" href="/sign-in?redirect_url=/dashboard/customer">Customer login</Link>
+            <Link className="text-link scout-header-link" href="/sign-in?redirect_url=/dashboard/scout">Scout login</Link>
+          </>}
           <Link className="button button-small" href="/request">Send a Scout</Link>
         </div>
       </header>
@@ -66,6 +68,7 @@ export default async function Home() {
             <Link className="button" href="/request">Start a mission <IconArrowRight size={20} /></Link>
             <Link className="button button-ghost" href="/scout">Earn as a Scout</Link>
           </div>
+          {!userId && <div className="returning-login">Already registered? <Link href="/sign-in?redirect_url=/dashboard/customer">Customer login</Link><span>·</span><Link href="/sign-in?redirect_url=/dashboard/scout">Scout login</Link></div>}
           <div className="trust-row">
             <span><IconShieldCheck size={18} /> Vetted local Scouts</span>
             <span><IconMapPin size={18} /> Starting in Eastern NC</span>

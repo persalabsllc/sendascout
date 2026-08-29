@@ -1,4 +1,5 @@
 import { OnboardingForm } from "@/components/onboarding-form";
+import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { requireAppUser } from "@/lib/app-user";
 
@@ -6,6 +7,8 @@ export default async function RequestPage({ searchParams }: { searchParams: Prom
   const { type } = await searchParams;
   const initialMissionType = type === "move-it" ? "move" : type === "meet-it" ? "meet" : "see";
   const requestPath = type ? `/request?type=${encodeURIComponent(type)}` : "/request";
+  const { userId } = await auth();
+  if (!userId) redirect(`/sign-in?redirect_url=${encodeURIComponent(requestPath)}`);
   const user = await requireAppUser("customer");
   if (!user.profileCompletedAt) redirect(`/dashboard/customer/profile?next=${encodeURIComponent(requestPath)}`);
   return <OnboardingForm mode="customer" initialMissionType={initialMissionType} initialMissionAddress={{
