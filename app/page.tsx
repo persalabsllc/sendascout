@@ -102,7 +102,7 @@ export default async function Home() {
             A trusted local person can check it, move it, meet it or wait for it—so you can be in two places at once.
           </p>
           <div className="hero-actions">
-            <Link className="button" href="/request">Start a mission <IconArrowRight size={20} /></Link>
+            <Link className="button" href="/request">Request a Scout <IconArrowRight size={20} /></Link>
             <Link className="button button-ghost" href="/scout">Earn as a Scout</Link>
           </div>
           <div className="trust-row">

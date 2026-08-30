@@ -7,6 +7,8 @@ const requestPage = readFileSync(new URL("../app/request/page.tsx", import.meta.
 const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("homepage explains recognizable customer pain points across every mission type", () => {
+  assert.match(home, />Request a Scout <IconArrowRight/);
+  assert.doesNotMatch(home, />Start a mission <IconArrowRight/);
   assert.match(home, /Real-life errands, solved/i);
   assert.match(home, /No truck\? Not nearby\? Can’t wait around\?/i);
   assert.match(home, /BBQ grill/i);
