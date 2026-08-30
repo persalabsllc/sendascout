@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { IconAlertTriangle, IconArrowRight, IconBook2, IconBriefcase, IconCheck, IconMail, IconRefresh, IconRoute, IconUserPlus, IconUsers } from "@tabler/icons-react";
+import { IconAlertTriangle, IconArrowRight, IconBook2, IconBriefcase, IconCheck, IconLifebuoy, IconMail, IconRefresh, IconRoute, IconUserPlus, IconUsers } from "@tabler/icons-react";
 import { adminSetMissionStatus } from "@/app/actions/missions";
 import { adminArchiveMission, adminResolveMissionCase, adminRetryNotification, adminSetOperationalEventStatus } from "@/app/actions/operations";
 import { Brand } from "./brand";
@@ -26,9 +26,9 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
     });
   }
   return <main className="control-page">
-    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room/analytics">Analytics</Link><Link href="/control-room/customers">Customers</Link><Link href="/control-room/scouts">Scouts</Link><Link href="/">Public site</Link></div></header>
+    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room/analytics">Analytics</Link><Link href="/control-room/customers">Customers</Link><Link href="/control-room/scouts">Scouts</Link><Link href="/control-room/support">Support</Link><Link href="/">Public site</Link></div></header>
     <div className="control-shell">
-      <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Approve Scouts, release missions and oversee every active job.</p></div><Link className="button button-small" href="/control-room/procedures"><IconBook2 size={17} /> Operations playbook</Link></div>
+      <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Approve Scouts, release missions and oversee every active job.</p></div><div className="control-title-actions"><Link className="button button-small button-ghost" href="/control-room/support"><IconLifebuoy size={17} /> Customer support</Link><Link className="button button-small" href="/control-room/procedures"><IconBook2 size={17} /> Operations playbook</Link></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="control-stats">
         <ControlStat alert={stats.newCustomers > 0} href="/control-room/customers" icon={IconUserPlus} label="New customers · 24h" value={stats.newCustomers} />

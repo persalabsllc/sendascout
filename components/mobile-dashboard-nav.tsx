@@ -8,6 +8,7 @@ import {
   IconBuildingStore,
   IconCalendarRepeat,
   IconHome,
+  IconLifebuoy,
   IconLogout,
   IconMenu2,
   IconSettings,
@@ -47,6 +48,7 @@ export function MobileDashboardNav({ role, name, initials }: MobileDashboardNavP
         { href: "/dashboard/customer/saved", label: "Saved & recurring", icon: IconCalendarRepeat },
         { href: "/dashboard/customer/business", label: "Business", icon: IconBuildingStore },
         { href: "/dashboard/customer/payments", label: "Payments", icon: IconWallet },
+        { href: "/dashboard/customer/support", label: "Contact Support", icon: IconLifebuoy },
         { href: "/dashboard/customer/profile", label: "Profile & settings", icon: IconUser },
         { href: "/dashboard/notifications", label: "Notifications", icon: IconBell },
       ];

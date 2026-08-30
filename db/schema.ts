@@ -499,6 +499,63 @@ export const missionCases = pgTable("mission_cases", {
   index("mission_cases_reporter_idx").on(table.reporterId),
 ]);
 
+export const customerSupportTickets = pgTable("customer_support_tickets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  missionId: uuid("mission_id").references(() => missions.id, { onDelete: "set null" }),
+  reason: text("reason").notNull(),
+  summary: text("summary").notNull(),
+  status: text("status").notNull().default("open"),
+  resolutionType: text("resolution_type"),
+  resolutionAmountCents: integer("resolution_amount_cents").notNull().default(0),
+  resolutionNote: text("resolution_note"),
+  proposedBy: uuid("proposed_by").references(() => users.id, { onDelete: "set null" }),
+  proposedAt: timestamp("proposed_at", { withTimezone: true }),
+  customerDecision: text("customer_decision"),
+  customerDecisionNote: text("customer_decision_note"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("customer_support_tickets_customer_idx").on(table.customerId),
+  index("customer_support_tickets_mission_idx").on(table.missionId),
+  index("customer_support_tickets_status_idx").on(table.status),
+  check("customer_support_tickets_reason_check", sql`${table.reason} IN ('mission_not_completed', 'mission_quality', 'scout_conduct', 'delivery_problem', 'billing_question', 'account_technical', 'other')`),
+  check("customer_support_tickets_status_check", sql`${table.status} IN ('open', 'awaiting_customer', 'closed')`),
+  check("customer_support_tickets_resolution_check", sql`${table.resolutionType} IS NULL OR ${table.resolutionType} IN ('full_refund', 'partial_refund', 'account_credit')`),
+  check("customer_support_tickets_decision_check", sql`${table.customerDecision} IS NULL OR ${table.customerDecision} IN ('approved', 'needs_review')`),
+  check("customer_support_tickets_amount_check", sql`${table.resolutionAmountCents} >= 0`),
+]);
+
+export const customerSupportMessages = pgTable("customer_support_messages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ticketId: uuid("ticket_id").notNull().references(() => customerSupportTickets.id, { onDelete: "cascade" }),
+  authorId: uuid("author_id").notNull().references(() => users.id),
+  authorRole: text("author_role").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("customer_support_messages_ticket_idx").on(table.ticketId),
+  check("customer_support_messages_role_check", sql`${table.authorRole} IN ('customer', 'admin')`),
+]);
+
+export const customerCredits = pgTable("customer_credits", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  ticketId: uuid("ticket_id").notNull().references(() => customerSupportTickets.id, { onDelete: "restrict" }),
+  amountCents: integer("amount_cents").notNull(),
+  remainingAmountCents: integer("remaining_amount_cents").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("customer_credits_customer_idx").on(table.customerId),
+  uniqueIndex("customer_credits_ticket_idx").on(table.ticketId),
+  check("customer_credits_amount_check", sql`${table.amountCents} > 0 AND ${table.remainingAmountCents} >= 0 AND ${table.remainingAmountCents} <= ${table.amountCents}`),
+  check("customer_credits_status_check", sql`${table.status} IN ('active', 'used', 'void')`),
+]);
+
 export const notifications = pgTable("notifications", {
   id: uuid("id").defaultRandom().primaryKey(),
   recipientUserId: uuid("recipient_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
