@@ -30,6 +30,7 @@ export type MissionQuoteInput = {
   address: string;
   addressLine2: string;
   city: string;
+  state: string;
   zip: string;
   pickupAddress: string;
   pickupAddressLine2: string;
@@ -61,7 +62,7 @@ export function calculateMissionPrice(type: "see" | "move" | "meet", pickupZip?:
 export async function calculateMissionQuote(input: MissionQuoteInput): Promise<MissionPriceQuote> {
   if (input.type !== "move") {
     const base = calculateMissionPrice(input.type);
-    const coordinates = googleMapsConfigured() ? await geocodeAddress(formatAddress(input.address, input.addressLine2, input.city, "NC", input.zip)) : null;
+    const coordinates = googleMapsConfigured() ? await geocodeAddress(formatAddress(input.address, input.addressLine2, input.city, input.state, input.zip)) : null;
     if (input.type === "meet") {
       const maximum = meetPriceForMinutes(input.meetAuthorizedMinutes);
       return { ...base, pickupCoordinates: coordinates, maximumCustomerPriceCents: maximum.customer, maximumScoutPayoutCents: maximum.scout };

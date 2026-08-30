@@ -44,7 +44,7 @@ export function CustomerProfileForm({ initialValue, nextPath }: { initialValue: 
             <Field label="First name" autoComplete="given-name" value={value.firstName} onChange={(event) => set("firstName", event.target.value)} />
             <Field label="Last name" autoComplete="family-name" value={value.lastName} onChange={(event) => set("lastName", event.target.value)} />
           </div>
-          <Field label="Mobile number" type="tel" autoComplete="tel" placeholder="(252) 555-0123" value={value.phone} onChange={(event) => set("phone", event.target.value)} />
+          <Field label="Mobile number" type="tel" autoComplete="tel" placeholder="555-123-4567" value={value.phone} onChange={(event) => set("phone", event.target.value)} />
           <div className="profile-address-label"><IconMapPin size={17} /><div><strong>Default address</strong><span>We’ll prefill this on new missions.</span></div></div>
           <Field label="Street address" autoComplete="street-address" value={value.addressLine1} onChange={(event) => set("addressLine1", event.target.value)} />
           <Field label="Apartment, suite, etc. (optional)" required={false} value={value.addressLine2} onChange={(event) => set("addressLine2", event.target.value)} />

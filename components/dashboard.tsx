@@ -123,12 +123,12 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner }: { missions:
   return <>
     {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : "Founding Scout application"}</strong><p>{profileStatus === "approved" ? "You’re approved and can claim matching missions in your delivery zone." : "Your application is saved. Identity and background verification will open before launch."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
     <div className="stat-grid scout-stats">
-      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open launch-area missions" />
+      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open missions in your area" />
       <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />
       <Stat icon={IconRoute} label="Completed" value={String(completed.length)} note={completed.length ? "Your completed missions" : "Ready for your first"} />
     </div>
     <section className="dash-section" id="missions">
-      <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities near your launch area.</p></div></div>
+      <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities within your selected service area.</p></div></div>
       {missionBoard.length ? <div className="mission-list scout-list">{missionBoard.map((mission) => {
         const Icon = iconFor(mission.type);
         return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
@@ -138,7 +138,7 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner }: { missions:
 }
 
 function EmptyMissions({ customer = false }: { customer?: boolean }) {
-  return <div className="dashboard-empty"><IconTargetArrow size={30} /><h3>{customer ? "No missions yet" : "The mission board is warming up"}</h3><p>{customer ? "Create your first mission and it will appear here immediately." : "Approved Scouts will see launch-area missions here as customers post them."}</p>{customer && <Link className="button button-small" href="/request">Create a mission</Link>}</div>;
+  return <div className="dashboard-empty"><IconTargetArrow size={30} /><h3>{customer ? "No missions yet" : "The mission board is warming up"}</h3><p>{customer ? "Create your first mission and it will appear here immediately." : "Approved Scouts will see matching nearby missions here as customers post them."}</p>{customer && <Link className="button button-small" href="/request">Create a mission</Link>}</div>;
 }
 
 function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) { return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>; }

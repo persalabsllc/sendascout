@@ -59,7 +59,7 @@ const emptyLocation = (businessAccountId: string): BusinessLocationInput => ({
   addressLine1: "",
   addressLine2: "",
   city: "",
-  state: "NC",
+  state: "",
   zip: "",
 });
 

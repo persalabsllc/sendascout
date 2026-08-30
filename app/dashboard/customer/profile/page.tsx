@@ -15,7 +15,7 @@ export default async function CustomerProfilePage({ searchParams }: { searchPara
     addressLine1: user.addressLine1 ?? "",
     addressLine2: user.addressLine2 ?? "",
     city: user.city ?? "",
-    state: user.state ?? "NC",
+    state: user.state ?? "",
     zip: user.zip ?? "",
     emailNotificationsEnabled: user.emailNotificationsEnabled,
     smsNotificationsEnabled: user.smsNotificationsEnabled,

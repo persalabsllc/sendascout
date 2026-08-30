@@ -21,7 +21,8 @@ import { hashDeliveryPin, normalizeDeliveryPin } from "@/lib/delivery-pin";
 import { calculateBundlePricing, calculateDiscountedMissionPrice, nextRecurrenceDate } from "@/lib/mission-features";
 import { alertEligibleScouts } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
-import { easternLocalDateTimeToUtc } from "@/lib/time";
+import { localDateTimeToUtc } from "@/lib/time";
+import { isMissionTimeZone, normalizeMissionTimeZone } from "@/lib/us-time-zones";
 
 export type MissionChecklistDraft = {
   prompt: string;
@@ -35,6 +36,7 @@ export type MissionInput = {
   address: string;
   addressLine2: string;
   city: string;
+  state: string;
   zip: string;
   pickupName: string;
   pickupAddress: string;
@@ -53,6 +55,7 @@ export type MissionInput = {
   largeItem: boolean;
   meetAuthorizedMinutes: number;
   scheduledFor: string;
+  timeZone: string;
   title: string;
   instructions: string;
   phone: string;
@@ -187,7 +190,8 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     const templateId = createdTemplateId ?? selectedTemplateId;
     const createdRecurrenceId = input.recurrence !== "once" && !reviewedRecurrence ? randomUUID() : null;
     const recurrenceId = reviewedRecurrence?.id ?? createdRecurrenceId;
-    const scheduledFor = reviewedRecurrence?.occurrenceAt ?? (input.scheduledFor ? easternLocalDateTimeToUtc(input.scheduledFor) : null);
+    const missionTimeZone = normalizeMissionTimeZone(reviewedRecurrence?.timeZone ?? input.timeZone);
+    const scheduledFor = reviewedRecurrence?.occurrenceAt ?? (input.scheduledFor ? localDateTimeToUtc(input.scheduledFor, missionTimeZone) : null);
     const preferredScoutExclusiveUntil = preferredScoutId ? new Date(now.getTime() + 60 * 60 * 1000) : null;
     const pinPepper = ((input.type === "move" && input.deliveryPinRequired) || (input.addMoveLeg && input.bundleDeliveryPinRequired)) ? requireDeliveryPinSecret() : "";
     const deliveryPinHash = input.type === "move" && input.deliveryPinRequired
@@ -217,7 +221,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       addressLine1: (input.type === "move" ? input.pickupAddress : input.address).trim(),
       addressLine2: (input.type === "move" ? input.pickupAddressLine2 : input.addressLine2).trim() || null,
       city: (input.type === "move" ? input.pickupCity : input.city).trim(),
-      state: input.type === "move" ? input.pickupState.trim().toUpperCase() : "NC",
+      state: (input.type === "move" ? input.pickupState : input.state).trim().toUpperCase(),
       zip: (input.type === "move" ? input.pickupZip : input.zip).trim(),
       pickupName: input.type === "move" ? input.pickupName.trim() : null,
       pickupInstructions: input.type === "move" ? input.pickupInstructions.trim() || null : null,
@@ -234,6 +238,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       enhancedReportRequested: input.enhancedReport,
       largeItem: input.type === "move" && input.largeItem,
       scheduledFor,
+      timezone: missionTimeZone,
       pickupLatitude: amount.pickupCoordinates?.latitude.toFixed(6) ?? null,
       pickupLongitude: amount.pickupCoordinates?.longitude.toFixed(6) ?? null,
       dropoffLatitude: amount.dropoffCoordinates?.latitude.toFixed(6) ?? null,
@@ -268,7 +273,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       addressLine1: input.address.trim(),
       addressLine2: input.addressLine2.trim() || null,
       city: input.city.trim(),
-      state: "NC",
+      state: input.state.trim().toUpperCase(),
       zip: input.zip.trim(),
       pickupName: input.title.trim(),
       pickupInstructions: "Continue this delivery after completing the Meet It appointment.",
@@ -284,6 +289,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       proofOfDeliveryRequired: true,
       largeItem: input.bundleLargeItem,
       scheduledFor,
+      timezone: missionTimeZone,
       pickupLatitude: childQuote.pickupCoordinates?.latitude.toFixed(6) ?? null,
       pickupLongitude: childQuote.pickupCoordinates?.longitude.toFixed(6) ?? null,
       dropoffLatitude: childQuote.dropoffCoordinates?.latitude.toFixed(6) ?? null,
@@ -316,7 +322,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       : noOp();
     const recurrence = createdRecurrenceId && createdTemplateId && scheduledFor ? recurrenceConfiguration(input, scheduledFor) : null;
     const recurrenceNextRunAt = recurrence ? nextRecurrenceDate(recurrence.startsAt, recurrence.rule, {
-      timeZone: "America/New_York",
+      timeZone: missionTimeZone,
       anchor: recurrence.startsAt,
     }) : null;
     const recurrenceEndsBeforeNext = Boolean(recurrence?.endsAt && recurrenceNextRunAt && recurrenceNextRunAt > recurrence.endsAt);
@@ -327,6 +333,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
           templateId: createdTemplateId,
           status: recurrenceEndsBeforeNext ? "ended" : "active",
           recurrenceRule: recurrence.rule,
+          timezone: missionTimeZone,
           startsAt: recurrence.startsAt,
           endsAt: recurrence.endsAt,
           nextRunAt: recurrenceEndsBeforeNext ? null : recurrenceNextRunAt,
@@ -413,9 +420,12 @@ function validateMissionInput(input: MissionInput) {
   } else {
     required(input.address, "Mission address");
     required(input.city, "City");
+    required(input.state, "State");
     required(input.zip, "ZIP code");
+    validateState(input.state, "mission");
     validateZip(input.zip, "mission");
   }
+  if (!isMissionTimeZone(input.timeZone)) throw new Error("Choose a valid mission time zone.");
   required(input.title, input.type === "move" ? "Item description" : "Mission title");
   required(input.instructions, input.type === "move" ? "Item and handling details" : "Instructions");
   required(input.phone, "Phone number");
@@ -443,7 +453,7 @@ function validateMissionInput(input: MissionInput) {
       pickupName: input.title,
       pickupAddress: input.address,
       pickupCity: input.city,
-      pickupState: "NC",
+      pickupState: input.state,
       pickupZip: input.zip,
       dropoffName: input.bundleDropoffName,
       dropoffAddress: input.bundleDropoffAddress,
@@ -479,12 +489,18 @@ function validateMoveStops(input: {
   required(input.dropoffCity, "Drop-off city");
   required(input.dropoffState, "Drop-off state");
   required(input.dropoffZip, "Drop-off ZIP code");
+  validateState(input.pickupState, "pickup");
+  validateState(input.dropoffState, "drop-off");
   validateZip(input.pickupZip, "pickup");
   validateZip(input.dropoffZip, "drop-off");
 }
 
 function validateZip(value: string, label: string) {
   if (!/^\d{5}(?:-\d{4})?$/.test(value.trim())) throw new Error(`Enter a valid ${label} ZIP code.`);
+}
+
+function validateState(value: string, label: string) {
+  if (!/^[A-Za-z]{2}$/.test(value.trim())) throw new Error(`Enter a valid two-letter ${label} state abbreviation.`);
 }
 
 function validateDeliveryConfirmation(method: MissionInput["deliveryMethod"], pinRequired: boolean, pin: string) {
@@ -501,7 +517,7 @@ function bundleMoveQuoteInput(input: MissionInput): MissionInput {
     pickupAddress: input.address,
     pickupAddressLine2: input.addressLine2,
     pickupCity: input.city,
-    pickupState: "NC",
+    pickupState: input.state,
     pickupZip: input.zip,
     dropoffName: input.bundleDropoffName,
     dropoffAddress: input.bundleDropoffAddress,
@@ -546,7 +562,7 @@ function recurrenceConfiguration(input: MissionInput, startsAt: Date) {
     : input.recurrence === "biweekly"
       ? "FREQ=WEEKLY;INTERVAL=2"
       : "FREQ=MONTHLY;INTERVAL=1";
-  const endsAt = input.recurrenceEndsOn ? easternLocalDateTimeToUtc(`${input.recurrenceEndsOn}T23:59`) : null;
+  const endsAt = input.recurrenceEndsOn ? localDateTimeToUtc(`${input.recurrenceEndsOn}T23:59`, input.timeZone) : null;
   if (endsAt && endsAt <= startsAt) throw new Error("The recurring schedule end date must be after its first mission.");
   return { rule, endsAt, startsAt };
 }
@@ -585,6 +601,7 @@ async function validateReviewedRecurrence(db: ReturnType<typeof getDb>, customer
   if (Number.isNaN(occurrenceAt.getTime())) throw new Error("The recurring occurrence date is invalid.");
   const [recurrence] = await db.select({
     id: missionRecurrences.id,
+    timeZone: missionRecurrences.timezone,
     lastRunAt: missionRecurrences.lastRunAt,
     nextRunAt: missionRecurrences.nextRunAt,
   }).from(missionRecurrences).where(and(
@@ -603,7 +620,7 @@ async function validateReviewedRecurrence(db: ReturnType<typeof getDb>, customer
     eq(missions.recurrenceOccurrenceAt, occurrenceAt),
   )).limit(1);
   if (existing) throw new Error("This recurring occurrence was already published. Return to Saved & recurring to review the next available date.");
-  return { id: recurrence.id, occurrenceAt };
+  return { id: recurrence.id, occurrenceAt, timeZone: recurrence.timeZone };
 }
 
 async function validatePreferredScout(db: ReturnType<typeof getDb>, customerId: string, input: MissionInput) {

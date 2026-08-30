@@ -79,7 +79,7 @@ export default async function Home() {
           </div>
           <div className="trust-row">
             <span><IconShieldCheck size={18} /> Vetted local Scouts</span>
-            <span><IconMapPin size={18} /> Starting in Eastern NC</span>
+            <span><IconMapPin size={18} /> Built for communities across the U.S.</span>
           </div>
         </div>
 

@@ -1,17 +1,7 @@
-const EASTERN_TIME_ZONE = "America/New_York";
+import { DEFAULT_MISSION_TIME_ZONE, normalizeMissionTimeZone } from "./us-time-zones.ts";
 
-const easternPartsFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: EASTERN_TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hourCycle: "h23",
-});
-
-export function easternLocalDateTimeToUtc(value: string) {
+export function localDateTimeToUtc(value: string, requestedTimeZone: string) {
+  const timeZone = normalizeMissionTimeZone(requestedTimeZone);
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value.trim());
   if (!match) throw new Error("Choose a valid date and time.");
 
@@ -21,22 +11,23 @@ export function easternLocalDateTimeToUtc(value: string) {
   let candidate = requestedAsUtc;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const parts = easternDateParts(new Date(candidate));
+    const parts = zonedDateParts(new Date(candidate), timeZone);
     const representedAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
     candidate += requestedAsUtc - representedAsUtc;
   }
 
   const result = new Date(candidate);
-  const actual = easternDateParts(result);
+  const actual = zonedDateParts(result, timeZone);
   if (actual.year !== year || actual.month !== month || actual.day !== day || actual.hour !== hour || actual.minute !== minute) {
-    throw new Error("That local time does not exist in Eastern Time. Choose another time.");
+    throw new Error("That local time does not exist in the selected time zone. Choose another time.");
   }
   return result;
 }
 
-export function formatEasternDateTime(value: Date | string) {
+export function formatDateTime(value: Date | string, requestedTimeZone: string) {
+  const timeZone = normalizeMissionTimeZone(requestedTimeZone);
   return new Intl.DateTimeFormat("en-US", {
-    timeZone: EASTERN_TIME_ZONE,
+    timeZone,
     month: "numeric",
     day: "numeric",
     year: "numeric",
@@ -46,8 +37,31 @@ export function formatEasternDateTime(value: Date | string) {
   }).format(typeof value === "string" ? new Date(value) : value);
 }
 
-function easternDateParts(value: Date) {
-  const parts = Object.fromEntries(easternPartsFormatter.formatToParts(value).map((part) => [part.type, part.value]));
+export function dateTimeLocalValue(value: Date, requestedTimeZone: string) {
+  const parts = zonedDateParts(value, normalizeMissionTimeZone(requestedTimeZone));
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}T${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
+}
+
+export function easternLocalDateTimeToUtc(value: string) {
+  return localDateTimeToUtc(value, DEFAULT_MISSION_TIME_ZONE);
+}
+
+export function formatEasternDateTime(value: Date | string) {
+  return formatDateTime(value, DEFAULT_MISSION_TIME_ZONE);
+}
+
+function zonedDateParts(value: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(value).map((part) => [part.type, part.value]));
   return {
     year: Number(parts.year),
     month: Number(parts.month),

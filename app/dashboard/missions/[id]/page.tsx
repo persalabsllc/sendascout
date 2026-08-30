@@ -115,6 +115,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       dropoff,
       deliveryInstructions: showFullAddress ? mission.deliveryInstructions : null,
       scheduledFor: mission.scheduledFor?.toISOString() ?? null,
+      timeZone: mission.timezone,
       customerPriceCents: mission.customerPriceCents,
       scoutPayoutCents: mission.scoutPayoutCents,
       claimScoutPayoutCents: bundle?.scoutPayoutCents ?? mission.scoutPayoutCents,

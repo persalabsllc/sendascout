@@ -17,7 +17,7 @@ import {
 import { openMissionCase } from "@/app/actions/operations";
 import type { MissionCaseKind } from "@/lib/mission-operations";
 import { meetActionOpensAt } from "@/lib/mission-timing";
-import { formatEasternDateTime } from "@/lib/time";
+import { formatDateTime } from "@/lib/time";
 
 type Status = "draft" | "open" | "claimed" | "en_route" | "onsite" | "en_route_pickup" | "at_pickup" | "en_route_dropoff" | "at_dropoff" | "submitted" | "completed" | "cancelled" | "disputed";
 type MissionView = {
@@ -31,6 +31,7 @@ type MissionView = {
   dropoff?: string | null;
   deliveryInstructions?: string | null;
   scheduledFor?: string | null;
+  timeZone: string;
   customerPriceCents: number;
   scoutPayoutCents: number;
   claimCustomerPriceCents: number;
@@ -254,7 +255,7 @@ export function MissionWorkspace({ role, mission, bundle, itinerary, messages, r
               {mission.type === "move" && <div className="mission-instructions"><strong>Vehicle requirement</strong><p>{mission.largeItem ? "Larger item — SUV, van or pickup truck requested" : "Small item — fits in a car or trunk"}</p></div>}
               {mission.type === "move" && <div className="mission-instructions"><strong>{mission.routeSource === "google" ? "Locked driving route" : "Route verification"}</strong><p>{mission.routeDistanceMeters ? `${routeMiles(mission.routeDistanceMeters)} road miles · approximately ${routeDuration(mission.routeDurationSeconds)}` : "Exact road mileage will be locked before this mission is released to Scouts."}</p></div>}
               <div className="mission-instructions"><strong>Mission instructions</strong><p>{mission.instructions}</p></div>
-              {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {formatEasternDateTime(mission.scheduledFor)}</p>}
+              {mission.scheduledFor && <p className="mission-time"><IconClock size={17} /> Scheduled for {formatDateTime(mission.scheduledFor, mission.timeZone)}</p>}
             </article>
 
             {canClaim && <article className="mission-panel claim-panel"><IconShieldCheck size={28} /><div><h2>Ready to take this mission?</h2><p>{bundle ? `One Scout completes all ${bundle.totalLegs} ordered parts. The complete itinerary pays ${money(mission.claimScoutPayoutCents)}.` : mission.type === "meet" && mission.maximumScoutPayoutCents && mission.maximumScoutPayoutCents > mission.scoutPayoutCents ? `${money(mission.scoutPayoutCents)} guaranteed first hour · up to ${money(mission.maximumScoutPayoutCents)} currently authorized` : "You’ll receive the full address and private customer chat after claiming."}</p></div><button className="button" disabled={pending} onClick={() => run(() => claimMission(mission.id))}>Claim for {money(mission.claimScoutPayoutCents)}</button></article>}
@@ -444,7 +445,7 @@ function meetActionAvailability(mission: MissionView, next: ReturnType<typeof ne
   if (opensAt === null) return { available: true, label: null, note: null };
   const action = next.status === "en_route" ? "Start trip" : "Check in";
   if (now === null || now < opensAt) {
-    return { available: false, label: `${action} available at ${formatEasternDateTime(new Date(opensAt))}`, note: next.status === "en_route" ? "Travel status opens 30 minutes before the appointment." : "Verified onsite check-in opens five minutes before the appointment." };
+    return { available: false, label: `${action} available at ${formatDateTime(new Date(opensAt), mission.timeZone)}`, note: next.status === "en_route" ? "Travel status opens 30 minutes before the appointment." : "Verified onsite check-in opens five minutes before the appointment." };
   }
   return { available: true, label: null, note: null };
 }

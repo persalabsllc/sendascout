@@ -6,6 +6,7 @@ import { OnboardingForm, type PreferredScoutOption } from "@/components/onboardi
 import { getDb } from "@/db";
 import { customerPreferredScouts, missionChecklistItems, missionRecurrences, missions, missionTemplates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { dateTimeLocalValue } from "@/lib/time";
 
 type RequestSearchParams = { type?: string; repeat?: string; template?: string; recurrence?: string; occurrence?: string };
 
@@ -28,7 +29,8 @@ export default async function RequestPage({ searchParams }: { searchParams: Prom
     if (!reviewedOccurrence) redirect("/dashboard/customer/saved");
     initialMission = {
       ...initialMission,
-      scheduledFor: easternDateTimeLocalValue(reviewedOccurrence.occurrenceAt),
+      scheduledFor: dateTimeLocalValue(reviewedOccurrence.occurrenceAt, reviewedOccurrence.timeZone),
+      timeZone: reviewedOccurrence.timeZone,
       recurrence: "once",
       recurrenceEndsOn: "",
       recurrenceScheduleId: reviewedOccurrence.recurrenceId,
@@ -44,7 +46,7 @@ export default async function RequestPage({ searchParams }: { searchParams: Prom
     initialMissionType={initialMission?.type ?? typeFromPath}
     initialMission={initialMission}
     preferredScouts={preferredScouts}
-    initialMissionAddress={{ address: user.addressLine1 ?? "", addressLine2: user.addressLine2 ?? "", city: user.city ?? "", zip: user.zip ?? "" }}
+    initialMissionAddress={{ address: user.addressLine1 ?? "", addressLine2: user.addressLine2 ?? "", city: user.city ?? "", state: user.state ?? "", zip: user.zip ?? "" }}
     initialPhone={user.phone ?? ""}
   />;
 }
@@ -80,19 +82,20 @@ async function loadMissionPrefill(db: ReturnType<typeof getDb>, customerId: stri
     address: mission.type === "move" ? "" : mission.addressLine1,
     addressLine2: mission.type === "move" ? "" : mission.addressLine2 ?? "",
     city: mission.type === "move" ? "" : mission.city,
+    state: mission.type === "move" ? "" : mission.state,
     zip: mission.type === "move" ? "" : mission.zip,
     pickupName: mission.pickupName ?? "",
     pickupAddress: mission.type === "move" ? mission.addressLine1 : "",
     pickupAddressLine2: mission.type === "move" ? mission.addressLine2 ?? "" : "",
     pickupCity: mission.type === "move" ? mission.city : "",
-    pickupState: mission.type === "move" ? mission.state : "NC",
+    pickupState: mission.type === "move" ? mission.state : "",
     pickupZip: mission.type === "move" ? mission.zip : "",
     pickupInstructions: mission.pickupInstructions ?? "",
     dropoffName: mission.dropoffName ?? "",
     dropoffAddress: mission.dropoffAddressLine1 ?? "",
     dropoffAddressLine2: mission.dropoffAddressLine2 ?? "",
     dropoffCity: mission.dropoffCity ?? "",
-    dropoffState: mission.dropoffState ?? "NC",
+    dropoffState: mission.dropoffState ?? "",
     dropoffZip: mission.dropoffZip ?? "",
     deliveryInstructions: stripDeliveryMethodLine(mission.deliveryInstructions),
     deliveryMethod: deliveryMethodFromInstructions(mission.deliveryInstructions, mission.deliveryPinRequired),
@@ -101,6 +104,7 @@ async function loadMissionPrefill(db: ReturnType<typeof getDb>, customerId: stri
     largeItem: mission.largeItem,
     meetAuthorizedMinutes: mission.meetAuthorizedMinutes,
     scheduledFor: "",
+    timeZone: mission.timezone,
     title: mission.title,
     instructions: mission.instructions,
     enhancedReport: mission.enhancedReportRequested,
@@ -143,7 +147,7 @@ function bundleLegPrefill(leg: typeof missions.$inferSelect): Partial<MissionInp
     bundleDropoffAddress: leg.dropoffAddressLine1 ?? "",
     bundleDropoffAddressLine2: leg.dropoffAddressLine2 ?? "",
     bundleDropoffCity: leg.dropoffCity ?? "",
-    bundleDropoffState: leg.dropoffState ?? "NC",
+    bundleDropoffState: leg.dropoffState ?? "",
     bundleDropoffZip: leg.dropoffZip ?? "",
     bundleDeliveryInstructions: stripDeliveryMethodLine(leg.deliveryInstructions),
     bundleTitle: leg.title,
@@ -158,7 +162,7 @@ function bundleLegPrefill(leg: typeof missions.$inferSelect): Partial<MissionInp
 function sanitizeTemplateConfiguration(value: Record<string, unknown>): Partial<MissionInput> {
   const safe: Partial<MissionInput> = {};
   const stringKeys: (keyof MissionInput)[] = [
-    "address", "addressLine2", "city", "zip", "pickupName", "pickupAddress", "pickupAddressLine2", "pickupCity", "pickupState", "pickupZip", "pickupInstructions",
+    "address", "addressLine2", "city", "state", "zip", "timeZone", "pickupName", "pickupAddress", "pickupAddressLine2", "pickupCity", "pickupState", "pickupZip", "pickupInstructions",
     "dropoffName", "dropoffAddress", "dropoffAddressLine2", "dropoffCity", "dropoffState", "dropoffZip", "deliveryInstructions", "title", "instructions",
     "bundleDropoffName", "bundleDropoffAddress", "bundleDropoffAddressLine2", "bundleDropoffCity", "bundleDropoffState", "bundleDropoffZip", "bundleDeliveryInstructions", "bundleTitle", "bundleInstructions",
   ];
@@ -220,22 +224,9 @@ async function loadRecurrenceOccurrence(db: ReturnType<typeof getDb>, customerId
       eq(missions.recurrenceId, recurrence.id),
       eq(missions.recurrenceOccurrenceAt, occurrenceAt),
     )).limit(1);
-    if (!existing) return { recurrenceId: recurrence.id, occurrenceAt };
+    if (!existing) return { recurrenceId: recurrence.id, occurrenceAt, timeZone: recurrence.timezone };
   }
   return null;
-}
-
-function easternDateTimeLocalValue(value: Date) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(value).map((part) => [part.type, part.value]));
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 function deliveryMethodFromInstructions(instructions: string | null, pinRequired: boolean): MissionInput["deliveryMethod"] {
