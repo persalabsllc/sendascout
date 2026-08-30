@@ -2,7 +2,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   IconArrowRight, IconBell, IconCamera, IconCircleCheck, IconClock, IconCoin,
-  IconBuildingStore, IconCalendarRepeat, IconDashboard, IconMapPin, IconPlus, IconRoute, IconSettings,
+  IconBuildingStore, IconCalendarRepeat, IconDashboard, IconLifebuoy, IconMapPin, IconPlus, IconRoute, IconSettings,
   IconShieldCheck, IconTargetArrow, IconUser, IconWallet,
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
@@ -67,6 +67,7 @@ export function Dashboard({
           <Link href={scout ? "/dashboard/scout/settings" : "/dashboard/customer/profile"}><IconUser size={20} /> Profile</Link>
         </nav>
         <div className="dash-sidebar-bottom">
+          {!scout && <Link href="/dashboard/customer/support"><IconLifebuoy size={19} /> Contact Support</Link>}
           <Link href={scout ? "/dashboard/scout/settings" : "/dashboard/customer/profile"}><IconSettings size={19} /> Settings</Link>
           <div className="dash-user"><span>{initials}</span><div><strong>{userName || "Your account"}</strong><small>{scout ? "Founding Scout" : "Customer"}</small></div></div>
         </div>

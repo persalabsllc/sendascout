@@ -5,6 +5,7 @@ import { customerSupportReasonLabel, customerSupportResolutionLabel, validSuppor
 
 const supportActions = readFileSync(new URL("../app/actions/support.ts", import.meta.url), "utf8");
 const customerShell = readFileSync(new URL("../components/customer-dashboard-shell.tsx", import.meta.url), "utf8");
+const dashboard = readFileSync(new URL("../components/dashboard.tsx", import.meta.url), "utf8");
 const controlRoom = readFileSync(new URL("../components/control-room.tsx", import.meta.url), "utf8");
 const footer = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 
@@ -31,6 +32,8 @@ test("customer approval is the only action that closes a proposed ticket and iss
 test("customer and admin navigation expose the separate support center", () => {
   assert.match(customerShell, /Contact Support/);
   assert.match(customerShell, /dashboard\/customer\/support/);
+  assert.match(dashboard, /Contact Support/);
+  assert.match(dashboard, /dashboard\/customer\/support/);
   assert.match(controlRoom, /control-room\/support/);
 });
 
