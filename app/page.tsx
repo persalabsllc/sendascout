@@ -2,42 +2,70 @@ import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import {
   IconArrowRight,
-  IconBox,
+  IconBuildingStore,
   IconCamera,
   IconCheck,
-  IconClock,
+  IconHome,
   IconMapPin,
+  IconPackageExport,
+  IconPhotoCheck,
   IconRoute,
   IconShieldCheck,
   IconSparkles,
+  IconTool,
+  IconTruckDelivery,
   IconUserCheck,
+  IconUsers,
 } from "@tabler/icons-react";
 import { Brand } from "@/components/brand";
 
 const customerSignInUrl = "/sign-in?portal=customer&redirect_url=/dashboard";
 const scoutSignInUrl = "/sign-in?portal=scout&redirect_url=/dashboard";
 
-const missions = [
+const useCases = [
   {
-    icon: IconCamera,
-    name: "See It",
-    price: "$29",
-    text: "Get current photos, video and answers from a real person standing there.",
-    accent: "teal",
-  },
-  {
-    icon: IconBox,
-    name: "Move It",
-    price: "From $19",
-    text: "Move a small prepaid item across town from $19. Distance and larger-item pricing is shown before you submit.",
+    icon: IconTool,
+    type: "Move It",
+    title: "Keep the jobsite moving.",
+    text: "Send a Scout to pick up a prepaid auto part, tool or supply order and bring it directly to the crew.",
+    examples: ["Auto parts", "Tools", "Supplies"],
+    href: "/request?type=move-it",
+    cta: "Deliver to the jobsite",
     accent: "coral",
+    size: "compact",
   },
   {
-    icon: IconClock,
-    name: "Meet It",
-    price: "$25/hr · $29 min",
-    text: "Have a Scout meet a vendor, wait for a technician or be present for you.",
+    icon: IconPackageExport,
+    type: "Move It",
+    title: "Send it across town.",
+    text: "Deliver documents, a small package or a prepaid store order to a home or business, with status updates and proof of delivery.",
+    examples: ["Packages", "Documents", "Store orders"],
+    href: "/request?type=move-it",
+    cta: "Start a delivery",
     accent: "navy",
+    size: "compact",
+  },
+  {
+    icon: IconPhotoCheck,
+    type: "See It",
+    title: "Get eyes on a property.",
+    text: "Request current photos or video of a rental home, business sign, used equipment or repair—without making the trip.",
+    examples: ["Rental homes", "Business signs", "Equipment"],
+    href: "/request?type=see-it",
+    cta: "Request photos or video",
+    accent: "teal",
+    size: "wide",
+  },
+  {
+    icon: IconUsers,
+    type: "Meet It",
+    title: "Be there without being there.",
+    text: "Have a Scout meet a contractor or cover an internet-installation or service window, confirm what happened and report back.",
+    examples: ["Contractors", "Internet installers", "Service windows"],
+    href: "/request?type=meet-it",
+    cta: "Cover an appointment",
+    accent: "coral",
+    size: "wide",
   },
 ];
 
@@ -49,7 +77,7 @@ export default async function Home() {
         <Brand />
         <nav aria-label="Main navigation">
           <a href="#how">How it works</a>
-          <a href="#missions">What Scouts do</a>
+          <a href="#missions">Ways to use it</a>
         </nav>
         <div className="header-actions">
           {userId ? <Link className="text-link desktop-account-link" href="/dashboard">Dashboard</Link> : <nav aria-label="Account sign in" className="desktop-auth-links">
@@ -106,21 +134,47 @@ export default async function Home() {
         </div>
       </section>
 
-      <section className="mission-section" id="missions">
+      <section className="mission-section" id="missions" aria-labelledby="use-cases-title">
         <div className="shell">
           <div className="section-heading">
-            <div><span className="kicker">One app. A thousand possibilities.</span><h2>What can we handle for you?</h2></div>
-            <p>Not another food-delivery app. Send a Scout is built for the errands that still require an actual human being.</p>
+            <div><span className="kicker">Real-life errands, solved</span><h2 id="use-cases-title">No truck? Not nearby? Can’t wait around? Send a Scout.</h2></div>
+            <p>You make the purchase or book the appointment. A vetted local Scout handles the in-person part and keeps you updated.</p>
           </div>
-          <div className="mission-grid">
-            {missions.map(({ icon: Icon, ...mission }) => (
-              <article className={`mission-card ${mission.accent}`} key={mission.name}>
-                <div className="mission-icon"><Icon size={28} /></div>
-                <div className="mission-title"><h3>{mission.name}</h3><span>{mission.price}</span></div>
-                <p>{mission.text}</p>
-                <Link href={`/request?type=${mission.name.toLowerCase().replace(" ", "-")}`}>Start this mission <IconArrowRight size={18} /></Link>
+          <div className="use-case-grid">
+            <article className="use-case-card use-case-featured">
+              <div className="use-case-card-head">
+                <span className="use-case-icon featured"><IconTruckDelivery size={29} aria-hidden="true" /></span>
+                <span className="use-case-type">Move It</span>
+              </div>
+              <span className="use-case-question">Need a pickup truck?</span>
+              <h3>Buy it there. We’ll help get it home.</h3>
+              <p>Purchase and prepay for a BBQ grill, boxed picnic table or other bulky store item. Choose the larger-item option so Scouts with an SUV, van or pickup can see the mission.</p>
+              <ol className="pickup-journey" aria-label="How a store-pickup mission works">
+                <li><span><IconBuildingStore size={22} aria-hidden="true" /></span><div><small>Step 1</small><strong>You buy &amp; prepay</strong></div></li>
+                <li><span><IconTruckDelivery size={22} aria-hidden="true" /></span><div><small>Step 2</small><strong>A Scout picks it up</strong></div></li>
+                <li><span><IconHome size={22} aria-hidden="true" /></span><div><small>Step 3</small><strong>Delivered to you</strong></div></li>
+              </ol>
+              <Link className="use-case-link use-case-link-light" href="/request?type=move-it">Arrange a store pickup <IconArrowRight size={18} aria-hidden="true" /></Link>
+            </article>
+
+            {useCases.map(({ icon: Icon, ...useCase }) => (
+              <article className={`use-case-card use-case-${useCase.size}`} key={useCase.title}>
+                <div className="use-case-card-head">
+                  <span className={`use-case-icon ${useCase.accent}`}><Icon size={27} aria-hidden="true" /></span>
+                  <span className="use-case-type">{useCase.type}</span>
+                </div>
+                <h3>{useCase.title}</h3>
+                <p>{useCase.text}</p>
+                <ul className="use-case-examples" aria-label={`${useCase.title} examples`}>
+                  {useCase.examples.map((example) => <li key={example}>{example}</li>)}
+                </ul>
+                <Link className="use-case-link" href={useCase.href}>{useCase.cta} <IconArrowRight size={18} aria-hidden="true" /></Link>
               </article>
             ))}
+          </div>
+          <div className="use-case-endcap">
+            <div><IconSparkles size={23} aria-hidden="true" /><p><strong>Have something else in mind?</strong> If it’s safe, legal and clearly described, tell us what needs to happen and what success looks like.</p></div>
+            <Link className="button button-dark" href="/request">Describe your mission <IconArrowRight size={20} aria-hidden="true" /></Link>
           </div>
         </div>
       </section>
