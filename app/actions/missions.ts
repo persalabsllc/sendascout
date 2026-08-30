@@ -23,7 +23,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
-import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
+import { alertEligibleScouts, alertScoutToOpenMissions, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
 import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-verification";
@@ -1290,7 +1290,16 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
       approvedAt: status === "approved" ? new Date() : null,
       updatedAt: new Date(),
     }).where(eq(scoutProfiles.id, profileId)).returning({ userId: scoutProfiles.userId });
-    if (profile && status === "approved") await notifyUser({ recipientUserId: profile.userId, kind: "scout_approved", title: "Your Scout application is approved", body: "You can now review and claim missions within your selected delivery zone.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
+    if (profile && status === "approved") {
+      await notifyUser({ recipientUserId: profile.userId, kind: "scout_approved", title: "Your Scout application is approved", body: "You can now review and claim missions within your selected delivery zone.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
+      try {
+        await alertScoutToOpenMissions(profile.userId);
+      } catch (alertError) {
+        console.warn("Scout approved, but existing mission alerts could not be backfilled", alertError);
+      }
+    }
+    revalidatePath("/dashboard/scout");
+    revalidatePath("/dashboard/scout/missions");
     revalidatePath("/control-room");
     return { ok: true };
   } catch (error) {

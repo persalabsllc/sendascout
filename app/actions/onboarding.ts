@@ -111,7 +111,7 @@ export type ScoutInput = {
   smsNotificationsEnabled: boolean;
 };
 
-export type OnboardingResult = { ok: true; id: string } | { ok: false; error: string };
+export type OnboardingResult = { ok: true; id: string; scoutUserId?: string } | { ok: false; error: string };
 
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
@@ -685,7 +685,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
       })
       .returning({ id: scoutProfiles.id });
 
-    return { ok: true, id: profile.id };
+    return { ok: true, id: profile.id, scoutUserId: user.id };
   } catch (error) {
     console.error("Scout onboarding failed", error);
     return { ok: false, error: error instanceof Error ? error.message : "We could not save your application." };

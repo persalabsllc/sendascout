@@ -1,6 +1,9 @@
 import "server-only";
 
-import { isWithinScoutZone } from "@/lib/geography";
+import { distanceBetweenZips } from "@/lib/geography";
+import { evaluateScoutMissionEligibility, type ScoutMissionEligibilityReason } from "@/lib/scout-matching-core";
+
+export type { ScoutMissionEligibilityReason } from "@/lib/scout-matching-core";
 
 type MissionForMatching = { type: "see" | "move" | "meet"; zip: string; largeItem: boolean };
 type ScoutForMatching = {
@@ -13,8 +16,11 @@ type ScoutForMatching = {
 };
 
 export function isMissionEligibleForScout(mission: MissionForMatching, scout: ScoutForMatching) {
-  const hasCapability = mission.type === "see" ? scout.canSee : mission.type === "move" ? scout.canMove : scout.canMeet;
-  if (!hasCapability || !isWithinScoutZone(scout.homeZip, mission.zip, scout.serviceRadiusMiles)) return false;
-  if (mission.type !== "move" || !mission.largeItem) return true;
-  return ["suv", "pickup truck", "van"].includes(scout.vehicleType?.trim().toLowerCase() ?? "");
+  return scoutMissionEligibility(mission, scout) === null;
+}
+
+export function scoutMissionEligibility(mission: MissionForMatching, scout: ScoutForMatching): ScoutMissionEligibilityReason | null {
+  const distance = distanceBetweenZips(scout.homeZip, mission.zip);
+  if (distance === null || distance > scout.serviceRadiusMiles) return "outside_zone";
+  return evaluateScoutMissionEligibility(mission, scout, distance).reason;
 }

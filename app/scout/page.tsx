@@ -13,8 +13,9 @@ export default async function ScoutPage() {
   const { userId } = await auth();
   if (!userId) return <ScoutAccess />;
   const user = await requireAppUser("scout");
-  const [profile] = await getDb().select({ id: scoutProfiles.id }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-  if (profile) redirect("/dashboard/scout");
+  const [profile] = await getDb().select({ id: scoutProfiles.id, headshotPath: scoutProfiles.headshotPath }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
+  if (profile?.headshotPath) redirect("/dashboard/scout");
+  if (profile) redirect("/dashboard/scout/settings");
   return <OnboardingForm mode="scout" />;
 }
 

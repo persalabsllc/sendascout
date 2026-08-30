@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { missionBundles, missions, notifications, scoutProfiles, users } from "@/db/schema";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
@@ -19,6 +19,33 @@ type NotificationInput = {
 
 function missionLabel(type: MissionKind) {
   return type === "see" ? "See It" : type === "move" ? "Move It" : "Meet It";
+}
+
+type MissionAlertRecord = typeof missions.$inferSelect;
+type MissionBundleRecord = typeof missionBundles.$inferSelect;
+
+function preferredWindowIsActive(mission: MissionAlertRecord, now = Date.now()) {
+  return Boolean(
+    mission.preferredScoutId
+    && mission.preferredScoutExclusiveUntil
+    && mission.preferredScoutExclusiveUntil.getTime() > now
+    && !mission.preferredScoutBroadcastAt
+  );
+}
+
+function missionAlertCopy(mission: MissionAlertRecord, legs: MissionAlertRecord[], bundle: MissionBundleRecord | null, preferredWindowActive: boolean) {
+  const labels = legs.map((leg) => missionLabel(leg.type));
+  const title = preferredWindowActive
+    ? `${labels.join(" + ")} offered to you first`
+    : `New ${labels.join(" + ")} mission nearby`;
+  const payoutCents = bundle?.scoutPayoutCents ?? mission.scoutPayoutCents;
+  const preferenceCopy = preferredWindowActive ? " You have an exclusive first-look window; acceptance is still first come, first served." : "";
+  return {
+    title,
+    body: `${mission.city}, ${mission.state} · Scout payout $${(payoutCents / 100).toFixed(0)}. Review the details and claim it if it fits your schedule.${preferenceCopy}`,
+    actionLabel: "Review mission",
+    actionUrl: `https://sendascout.com/dashboard/missions/${mission.id}`,
+  };
 }
 
 function escapeHtml(value: string) {
@@ -234,31 +261,68 @@ export async function alertEligibleScouts(missionId: string) {
   const eligibleScouts = scoutRows.filter((scout) => legs.every((leg) => isMissionEligibleForScout(leg, scout)));
 
   const now = Date.now();
-  const preferredWindowActive = Boolean(
-    mission.preferredScoutId
-    && mission.preferredScoutExclusiveUntil
-    && mission.preferredScoutExclusiveUntil.getTime() > now
-    && !mission.preferredScoutBroadcastAt,
-  );
+  const preferredWindowActive = preferredWindowIsActive(mission, now);
   const scouts = preferredWindowActive
     ? eligibleScouts.filter((scout) => scout.userId === mission.preferredScoutId)
     : eligibleScouts.filter((scout) => !mission.preferredScoutBroadcastAt || scout.userId !== mission.preferredScoutId);
 
-  const labels = legs.map((leg) => missionLabel(leg.type));
-  const title = preferredWindowActive
-    ? `${labels.join(" + ")} offered to you first`
-    : `New ${labels.join(" + ")} mission nearby`;
-  const payoutCents = bundle?.scoutPayoutCents ?? mission.scoutPayoutCents;
-  const preferenceCopy = preferredWindowActive ? " You have an exclusive first-look window; acceptance is still first come, first served." : "";
-  const body = `${mission.city}, ${mission.state} · Scout payout $${(payoutCents / 100).toFixed(0)}. Review the details and claim it if it fits your schedule.${preferenceCopy}`;
-  const actionUrl = `https://sendascout.com/dashboard/missions/${mission.id}`;
-  await Promise.all(scouts.map((scout) => notifyUser({
-    recipientUserId: scout.userId,
-    missionId,
-    kind: "new_mission",
-    title,
-    body,
-    actionLabel: "Review mission",
-    actionUrl,
-  })));
+  const copy = missionAlertCopy(mission, legs, bundle, preferredWindowActive);
+  await Promise.all(scouts.map((scout) => notifyUser({ recipientUserId: scout.userId, missionId, kind: "new_mission", ...copy })));
+}
+
+export async function alertScoutToOpenMissions(scoutUserId: string) {
+  const db = getDb();
+  const [scout] = await db.select({
+    userId: users.id,
+    homeZip: scoutProfiles.homeZip,
+    serviceRadiusMiles: scoutProfiles.serviceRadiusMiles,
+    vehicleType: scoutProfiles.vehicleType,
+    canSee: scoutProfiles.canSee,
+    canMove: scoutProfiles.canMove,
+    canMeet: scoutProfiles.canMeet,
+  }).from(scoutProfiles).innerJoin(users, eq(users.id, scoutProfiles.userId)).where(and(
+    eq(users.id, scoutUserId),
+    eq(users.status, "active"),
+    eq(scoutProfiles.status, "approved"),
+  )).limit(1);
+  if (!scout) return 0;
+
+  const [openRows, existingAlerts] = await Promise.all([
+    db.select().from(missions).where(and(eq(missions.status, "open"), sql`${missions.archivedAt} IS NULL`)).orderBy(asc(missions.createdAt)),
+    db.select({ missionId: notifications.missionId }).from(notifications).where(and(
+      eq(notifications.recipientUserId, scoutUserId),
+      eq(notifications.channel, "in_app"),
+      eq(notifications.kind, "new_mission"),
+    )),
+  ]);
+  const roots = openRows.filter((mission) => !mission.bundleId || mission.bundleSequence === 1);
+  const bundleIds = [...new Set(roots.flatMap((mission) => mission.bundleId ? [mission.bundleId] : []))];
+  const [bundleRows, bundleLegs] = bundleIds.length ? await Promise.all([
+    db.select().from(missionBundles).where(inArray(missionBundles.id, bundleIds)),
+    db.select().from(missions).where(and(inArray(missions.bundleId, bundleIds), sql`${missions.archivedAt} IS NULL`)).orderBy(asc(missions.bundleSequence)),
+  ]) : [[], []];
+  const bundleById = new Map(bundleRows.map((bundle) => [bundle.id, bundle]));
+  const legsByBundle = new Map<string, MissionAlertRecord[]>();
+  for (const leg of bundleLegs) {
+    if (!leg.bundleId) continue;
+    const legs = legsByBundle.get(leg.bundleId) ?? [];
+    legs.push(leg);
+    legsByBundle.set(leg.bundleId, legs);
+  }
+  const alreadyAlerted = new Set(existingAlerts.flatMap((item) => item.missionId ? [item.missionId] : []));
+  const candidates = roots.filter((mission) => {
+    if (alreadyAlerted.has(mission.id)) return false;
+    const preferredWindowActive = preferredWindowIsActive(mission);
+    if (preferredWindowActive && mission.preferredScoutId !== scoutUserId) return false;
+    const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
+    return legs.every((leg) => isMissionEligibleForScout(leg, scout));
+  });
+
+  await Promise.all(candidates.map((mission) => {
+    const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
+    const bundle = mission.bundleId ? bundleById.get(mission.bundleId) ?? null : null;
+    const copy = missionAlertCopy(mission, legs, bundle, preferredWindowIsActive(mission));
+    return notifyUser({ recipientUserId: scoutUserId, missionId: mission.id, kind: "new_mission", ...copy });
+  }));
+  return candidates.length;
 }

@@ -558,6 +558,9 @@ button, input, textarea, select { font: inherit; }
 .headshot-editor label { position: relative; cursor: pointer; }
 .headshot-editor input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .headshot-editor label:focus-within { outline: 3px solid rgba(0,169,149,.22); outline-offset: 2px; }
+.onboarding-headshot { padding-top: 4px; }
+.selected-file { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: #318774; font-size: 9px; font-weight: 800; vertical-align: middle; }
+.required-profile-banner { margin-bottom: 22px; }
 .notification-check { margin: 20px 0; align-items: flex-start; }
 .notification-check span { display: grid; gap: 3px; }
 .notification-check small { color: #7d8f95; font-weight: 500; line-height: 1.5; }

@@ -185,6 +185,7 @@ export async function saveScoutHeadshot(pathname: string): Promise<ProfileResult
     }
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/settings");
+    revalidatePath("/scout");
     revalidatePath("/dashboard/missions/[id]", "page");
     revalidatePath("/control-room");
     return { ok: true };

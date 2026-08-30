@@ -3,8 +3,10 @@
 import { FormEvent, useState, useTransition } from "react";
 import Link from "next/link";
 import { useUser } from "@clerk/nextjs";
-import { IconArrowLeft, IconArrowRight, IconCheck, IconCircleCheck, IconLock, IconPlus, IconTrash } from "@tabler/icons-react";
+import { upload } from "@vercel/blob/client";
+import { IconArrowLeft, IconArrowRight, IconCamera, IconCheck, IconCircleCheck, IconLock, IconPlus, IconTrash } from "@tabler/icons-react";
 import { createMission, createScoutApplication, getMissionPriceQuote, type MissionCreationQuote, type MissionInput, type ScoutInput } from "@/app/actions/onboarding";
+import { saveScoutHeadshot } from "@/app/actions/profile";
 import { easternLocalDateTimeToUtc, formatEasternDateTime } from "@/lib/time";
 import { Brand } from "./brand";
 
@@ -33,6 +35,7 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const [quote, setQuote] = useState<MissionCreationQuote | null>(null);
+  const [scoutHeadshot, setScoutHeadshot] = useState<File | null>(null);
   const [mission, setMission] = useState<MissionInput>({
     ...emptyMission,
     ...initialMissionAddress,
@@ -64,6 +67,10 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
   function advance(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (!customer && step >= 2 && !scoutHeadshot) {
+      setError("Add a clear profile headshot before finishing your Scout application.");
+      return;
+    }
     if (step < steps.length - 1) {
       if (customer && step === steps.length - 2) {
         return startTransition(async () => {
@@ -78,10 +85,56 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
       return setStep((value) => value + 1);
     }
     startTransition(async () => {
-      const result = customer ? await createMission(mission) : await createScoutApplication(scout);
-      if (result.ok) setComplete(true);
-      else setError(result.error);
+      if (customer) {
+        const result = await createMission(mission);
+        if (result.ok) setComplete(true);
+        else setError(result.error);
+        return;
+      }
+
+      const result = await createScoutApplication(scout);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (!scoutHeadshot || !result.scoutUserId) {
+        setError("Your application details were saved, but the required profile photo is still missing. Choose a photo and try again.");
+        return;
+      }
+      try {
+        const safeName = scoutHeadshot.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+        const blob = await upload(`scout-headshots/${result.scoutUserId}/${crypto.randomUUID()}-${safeName}`, scoutHeadshot, {
+          access: "private",
+          handleUploadUrl: "/api/scout-headshot/upload",
+        });
+        const saved = await saveScoutHeadshot(blob.pathname);
+        if (!saved.ok) throw new Error(saved.error);
+        setComplete(true);
+      } catch (uploadError) {
+        setError(uploadError instanceof Error
+          ? `Your application details were saved, but the required photo did not finish: ${uploadError.message}`
+          : "Your application details were saved, but the required photo did not finish uploading. Try again.");
+      }
     });
+  }
+
+  function chooseScoutHeadshot(file: File | null) {
+    setError("");
+    if (!file) {
+      setScoutHeadshot(null);
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setScoutHeadshot(null);
+      setError("Choose a JPG, PNG, or WEBP profile photo.");
+      return;
+    }
+    if (file.size <= 0 || file.size > 5 * 1024 * 1024) {
+      setScoutHeadshot(null);
+      setError("Choose a profile photo smaller than 5 MB.");
+      return;
+    }
+    setScoutHeadshot(file);
   }
 
   if (complete) return (
@@ -112,11 +165,11 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
           <div className="mobile-progress">Step {step + 1} of {steps.length}<span><i style={{ width: `${((step + 1) / steps.length) * 100}%` }} /></span></div>
           <span className="kicker">{steps[step]}</span><h1>{heading[step]}</h1>
           <p className="form-lede">{customer ? "Clear details help the right Scout claim your mission quickly." : "Founding Scouts get early access to missions and help us shape the marketplace."}</p>
-          <div className="fields">{customer ? <CustomerStep step={step} value={mission} setValue={setMission} quote={quote} preferredScouts={preferredScouts} /> : <ScoutStep step={step} value={scout} setValue={setScout} email={user?.primaryEmailAddress?.emailAddress ?? "Your verified account email"} />}</div>
+          <div className="fields">{customer ? <CustomerStep step={step} value={mission} setValue={setMission} quote={quote} preferredScouts={preferredScouts} /> : <ScoutStep step={step} value={scout} setValue={setScout} email={user?.primaryEmailAddress?.emailAddress ?? "Your verified account email"} headshot={scoutHeadshot} onHeadshot={chooseScoutHeadshot} />}</div>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="form-actions">
             <button type="button" className="button button-ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0 || isPending}><IconArrowLeft size={19} /> Back</button>
-            <button className="button" type="submit" disabled={isPending}>{isPending ? (customer ? "Publishing…" : "Saving…") : step === steps.length - 1 ? (customer ? "Publish mission" : "Join the network") : "Continue"}<IconArrowRight size={19} /></button>
+            <button className="button" type="submit" disabled={isPending}>{isPending ? (customer ? "Publishing…" : "Finishing application…") : step === steps.length - 1 ? (customer ? "Publish mission" : "Join the network") : "Continue"}<IconArrowRight size={19} /></button>
           </div>
         </form>
       </section>
@@ -180,13 +233,13 @@ function DeliveryConfirmation({ method, pinRequired, pin, onMethod, onPinRequire
   return <fieldset className="option-card delivery-confirmation"><legend>Delivery confirmation</legend><p>A private proof-of-delivery photo is always required for new Move It missions.</p><div className="choice-grid"><label className="choice"><input type="radio" name={`delivery-method-${pinRequired ? "pin" : "plain"}`} checked={method === "hand_to_recipient"} onChange={() => onMethod("hand_to_recipient")} /><span><strong>Hand to recipient</strong><small>Someone will receive the item</small></span></label><label className="choice"><input type="radio" name={`delivery-method-${pinRequired ? "pin" : "plain"}`} checked={method === "leave_at_location"} onChange={() => onMethod("leave_at_location")} /><span><strong>Leave at approved location</strong><small>The delivery photo confirms placement</small></span></label></div>{method === "hand_to_recipient" && <><label className="check option-toggle"><input type="checkbox" checked={pinRequired} onChange={(event) => onPinRequired(event.target.checked)} /><span><strong>Require a recipient PIN</strong><small>Create, save and share the code privately with the recipient now. The Scout is never shown it.</small></span></label>{pinRequired && <><Field label="6-digit recipient PIN" type="text" inputMode="numeric" autoComplete="off" pattern="[0-9]{6}" maxLength={6} placeholder="000000" value={pin} onChange={(event) => onPin(event.target.value.replace(/\D/g, "").slice(0, 6))} /><p className="pin-warning" role="note"><strong>Save and share this PIN before publishing.</strong> For security, it cannot be viewed or recovered later by you, the Scout or support.</p></>}</>}</fieldset>;
 }
 
-function ScoutStep({ step, value, setValue, email }: { step: number; value: ScoutInput; setValue: React.Dispatch<React.SetStateAction<ScoutInput>>; email: string }) {
+function ScoutStep({ step, value, setValue, email, headshot, onHeadshot }: { step: number; value: ScoutInput; setValue: React.Dispatch<React.SetStateAction<ScoutInput>>; email: string; headshot: File | null; onHeadshot: (file: File | null) => void }) {
   const set = <K extends keyof ScoutInput>(key: K, next: ScoutInput[K]) => setValue((old) => ({ ...old, [key]: next }));
   if (step === 0) return <><div className="field-row"><Field label="First name" placeholder="Jordan" value={value.firstName} onChange={(event) => set("firstName", event.target.value)} /><Field label="Last name" placeholder="Taylor" value={value.lastName} onChange={(event) => set("lastName", event.target.value)} /></div><Field label="Account email" type="email" value={email} readOnly required={false} /><Field label="Mobile number" type="tel" placeholder="(252) 555-0123" value={value.phone} onChange={(event) => set("phone", event.target.value)} /></>;
   if (step === 1) return <><Field label="Home ZIP code" placeholder="28560" inputMode="numeric" value={value.homeZip} onChange={(event) => set("homeZip", event.target.value)} /><label className="field"><span>How far are you willing to travel?</span><select required value={value.radius} onChange={(event) => set("radius", Number(event.target.value))}><option value={10}>10 miles</option><option value={25}>25 miles</option><option value={50}>50 miles</option><option value={75}>75+ miles</option></select></label><div className="check-grid"><Check label="See It missions" checked={value.canSee} onChange={(checked) => set("canSee", checked)} /><Check label="Move It missions" checked={value.canMove} onChange={(checked) => set("canMove", checked)} /><Check label="Meet It missions" checked={value.canMeet} onChange={(checked) => set("canMeet", checked)} /></div></>;
-  if (step === 2) return <><label className="field"><span>Vehicle access</span><select required value={value.vehicleType} onChange={(event) => set("vehicleType", event.target.value)}><option value="" disabled>Select your vehicle</option><option>Car</option><option>SUV</option><option>Pickup truck</option><option>Van</option><option>No vehicle</option></select></label><Field label="Gig-work experience (optional)" required={false} placeholder="DoorDash, Uber, field inspections, courier work…" value={value.experience} onChange={(event) => set("experience", event.target.value)} /><label className="check notification-check"><input type="checkbox" checked={value.smsNotificationsEnabled} onChange={(event) => set("smsNotificationsEnabled", event.target.checked)} /><span><strong>Text mission alerts (optional)</strong><small>By checking this box, I agree to receive transactional mission and account texts from Send a Scout. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of participation. See <Link href="/terms" target="_blank">Terms</Link> and <Link href="/privacy" target="_blank">Privacy</Link>.</small></span></label><label className="check consent"><input required type="checkbox" checked={value.consent} onChange={(event) => set("consent", event.target.checked)} /> I am at least 18 and agree to identity and background verification before accepting missions.</label></>;
+  if (step === 2) return <><label className="field"><span>Vehicle access</span><select required value={value.vehicleType} onChange={(event) => set("vehicleType", event.target.value)}><option value="" disabled>Select your vehicle</option><option>Car</option><option>SUV</option><option>Pickup truck</option><option>Van</option><option>No vehicle</option></select></label><Field label="Gig-work experience (optional)" required={false} placeholder="DoorDash, Uber, field inspections, courier work…" value={value.experience} onChange={(event) => set("experience", event.target.value)} /><div className="headshot-editor onboarding-headshot"><div className="headshot-preview"><IconCamera size={34} /></div><div><h3>Profile headshot <span aria-hidden="true">*</span></h3><p>A clear, current JPG, PNG, or WEBP photo of your face is required before Control Room can approve your application. Maximum 5 MB.</p><label className="button button-ghost button-small">{headshot ? "Change photo" : "Choose photo"}<input type="file" accept="image/jpeg,image/png,image/webp" required={!headshot} onChange={(event) => onHeadshot(event.target.files?.[0] ?? null)} /></label>{headshot && <small className="selected-file"><IconCheck size={15} /> {headshot.name}</small>}</div></div><label className="check notification-check"><input type="checkbox" checked={value.smsNotificationsEnabled} onChange={(event) => set("smsNotificationsEnabled", event.target.checked)} /><span><strong>Text mission alerts (optional)</strong><small>By checking this box, I agree to receive transactional mission and account texts from Send a Scout. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of participation. See <Link href="/terms" target="_blank">Terms</Link> and <Link href="/privacy" target="_blank">Privacy</Link>.</small></span></label><label className="check consent"><input required type="checkbox" checked={value.consent} onChange={(event) => set("consent", event.target.checked)} /> I am at least 18 and agree to identity and background verification before accepting missions.</label></>;
   const access = [value.canSee && "See It", value.canMove && "Move It", value.canMeet && "Meet It"].filter(Boolean).join(" · ");
-  return <div className="review-box"><Review label="Delivery zone" value={`${value.homeZip} · within ${value.radius} miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>You’ll see matching missions anywhere inside your selected delivery zone. Submitting does not create an employment relationship or guarantee missions.</p></div>;
+  return <div className="review-box"><Review label="Delivery zone" value={`${value.homeZip} · within ${value.radius} miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Profile photo" value={headshot?.name ?? "Required before submission"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>You’ll see matching missions anywhere inside your selected delivery zone. Submitting does not create an employment relationship or guarantee missions.</p></div>;
 }
 
 function Field({ label, required = true, ...props }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) { return <label className="field"><span>{label}</span><input required={required} {...props} /></label>; }
