@@ -1,10 +1,11 @@
 "use server";
 
 import { clerkClient } from "@clerk/nextjs/server";
+import { del, head } from "@vercel/blob";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { scoutProfiles, users } from "@/db/schema";
+import { missions, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export type CustomerProfileInput = {
@@ -17,10 +18,11 @@ export type CustomerProfileInput = {
   state: string;
   zip: string;
   emailNotificationsEnabled: boolean;
+  smsNotificationsEnabled: boolean;
 };
 
 export type ProfileResult = { ok: true } | { ok: false; error: string };
-export type ScoutSettingsInput = { homeZip: string; serviceRadiusMiles: number; vehicleType: string; canSee: boolean; canMove: boolean; canMeet: boolean; emailNotificationsEnabled: boolean };
+export type ScoutSettingsInput = { homeZip: string; serviceRadiusMiles: number; vehicleType: string; canSee: boolean; canMove: boolean; canMeet: boolean; emailNotificationsEnabled: boolean; smsNotificationsEnabled: boolean };
 
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
@@ -42,7 +44,13 @@ export async function saveScoutSettings(input: ScoutSettingsInput): Promise<Prof
       canMeet: input.canMeet,
       updatedAt: new Date(),
     }).where(eq(scoutProfiles.userId, user.id));
-    await getDb().update(users).set({ emailNotificationsEnabled: input.emailNotificationsEnabled, updatedAt: new Date() }).where(eq(users.id, user.id));
+    if (input.smsNotificationsEnabled && !user.phone) throw new Error("Add a mobile number before enabling text alerts.");
+    await getDb().update(users).set({
+      emailNotificationsEnabled: input.emailNotificationsEnabled,
+      smsNotificationsEnabled: input.smsNotificationsEnabled,
+      smsConsentedAt: input.smsNotificationsEnabled ? user.smsConsentedAt ?? new Date() : user.smsConsentedAt,
+      updatedAt: new Date(),
+    }).where(eq(users.id, user.id));
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/missions");
     revalidatePath("/dashboard/scout/settings");
@@ -84,6 +92,8 @@ export async function saveCustomerProfile(input: CustomerProfileInput): Promise<
         zip: input.zip.trim(),
         profileCompletedAt: new Date(),
         emailNotificationsEnabled: input.emailNotificationsEnabled,
+        smsNotificationsEnabled: input.smsNotificationsEnabled,
+        smsConsentedAt: input.smsNotificationsEnabled ? user.smsConsentedAt ?? new Date() : user.smsConsentedAt,
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
@@ -106,14 +116,86 @@ export async function saveCustomerProfile(input: CustomerProfileInput): Promise<
 }
 
 export async function saveScoutHeadshot(pathname: string): Promise<ProfileResult> {
+  let cleanupPath: string | null = null;
   try {
     const user = await requireAppUser("scout");
-    if (!pathname.startsWith("scout-headshots/upload/") || pathname.includes("..")) throw new Error("That profile photo could not be verified.");
-    await getDb().update(scoutProfiles).set({ headshotPath: pathname, updatedAt: new Date() }).where(eq(scoutProfiles.userId, user.id));
+    if (!pathname.startsWith(`scout-headshots/${user.id}/`) || pathname.includes("..")) throw new Error("That profile photo could not be verified.");
+    const activeMissionStatuses = ["claimed", "en_route", "onsite", "en_route_pickup", "at_pickup", "en_route_dropoff", "at_dropoff", "submitted", "disputed"] as const;
+    const [activeMission] = await getDb().select({ id: missions.id }).from(missions).where(and(
+      eq(missions.scoutId, user.id),
+      inArray(missions.status, activeMissionStatuses),
+      isNull(missions.archivedAt),
+    )).limit(1);
+    if (activeMission) throw new Error("Finish or resolve your active mission before changing the verified photo customers rely on.");
+    const metadata = await head(pathname);
+    if (
+      metadata.pathname !== pathname
+      || !["image/jpeg", "image/png", "image/webp"].includes(metadata.contentType)
+      || metadata.size <= 0
+      || metadata.size > 5 * 1024 * 1024
+    ) throw new Error("That profile photo is missing or has an unsupported format.");
+    const db = getDb();
+    const [existing] = await db.select({
+      headshotPath: scoutProfiles.headshotPath,
+      identityCheck: scoutProfiles.identityCheck,
+      status: scoutProfiles.status,
+    }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
+    if (!existing || existing.status === "rejected") throw new Error("Your Scout profile is not eligible for photo uploads.");
+    cleanupPath = existing.headshotPath === pathname ? null : pathname;
+    const needsIdentityReview = existing.identityCheck === "clear" || existing.status === "approved";
+    const lockProfile = db.update(scoutProfiles).set({
+      updatedAt: sql`${scoutProfiles.updatedAt}`,
+    }).where(and(
+      eq(scoutProfiles.userId, user.id),
+      eq(scoutProfiles.status, existing.status),
+      eq(scoutProfiles.identityCheck, existing.identityCheck),
+      sql`${scoutProfiles.headshotPath} IS NOT DISTINCT FROM ${existing.headshotPath}`,
+    )).returning({ id: scoutProfiles.id });
+    const savePhoto = db.update(scoutProfiles).set({
+      headshotPath: pathname,
+      identityCheck: needsIdentityReview ? "review" : existing.identityCheck,
+      identityVerifiedAt: needsIdentityReview ? null : undefined,
+      identityVerifiedBy: needsIdentityReview ? null : undefined,
+      status: existing.status === "approved" ? "review" : existing.status,
+      approvedAt: existing.status === "approved" ? null : undefined,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(scoutProfiles.userId, user.id),
+      eq(scoutProfiles.status, existing.status),
+      sql`NOT EXISTS (
+        SELECT 1 FROM missions AS active_mission
+        WHERE active_mission.scout_id = ${user.id}
+          AND active_mission.status IN ('claimed', 'en_route', 'onsite', 'en_route_pickup', 'at_pickup', 'en_route_dropoff', 'at_dropoff', 'submitted', 'disputed')
+          AND active_mission.archived_at IS NULL
+      )`,
+    )).returning({ id: scoutProfiles.id });
+    const [lockedRows, updatedRows] = await db.batch([lockProfile, savePhoto]);
+    if (!lockedRows[0] || !updatedRows[0]) throw new Error("Your Scout profile or active mission changed in another window. Refresh before trying again.");
+    cleanupPath = null;
+    if (existing.headshotPath && existing.headshotPath !== pathname) {
+      const [retainedMission] = await db.select({ id: missions.id }).from(missions)
+        .where(eq(missions.scoutHeadshotPathSnapshot, existing.headshotPath)).limit(1);
+      if (!retainedMission) {
+        try {
+          await del(existing.headshotPath);
+        } catch (error) {
+          console.warn("Old Scout headshot could not be removed", error);
+        }
+      }
+    }
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/settings");
+    revalidatePath("/dashboard/missions/[id]", "page");
+    revalidatePath("/control-room");
     return { ok: true };
   } catch (error) {
+    if (cleanupPath) {
+      try {
+        await del(cleanupPath);
+      } catch (cleanupError) {
+        console.warn("Unattached Scout headshot could not be removed", cleanupError);
+      }
+    }
     return { ok: false, error: error instanceof Error ? error.message : "We could not save your profile photo." };
   }
 }

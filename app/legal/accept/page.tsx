@@ -29,7 +29,7 @@ export default async function LegalAcceptancePage() {
         <label className="arbitration-consent"><input type="checkbox" name="arbitration" value="accepted" required /><span>I specifically agree to the binding individual arbitration agreement and class-action and jury-trial waivers in the Terms, including the right to opt out within 30 days.</span></label>
         <button className="button" type="submit">Accept and enter Send a Scout</button>
       </form>
-      <small>Acceptance is required to use the marketplace. You may review these documents before deciding. Questions: <a href="mailto:hello@sendascout.com">hello@sendascout.com</a>.</small>
+      <small>Acceptance is required to use the marketplace. You may review these documents before deciding. Questions: <a href="mailto:support@sendascout.com">support@sendascout.com</a>.</small>
     </section>
   </main>;
 }

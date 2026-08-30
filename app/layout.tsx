@@ -11,6 +11,10 @@ export const metadata: Metadata = {
   description:
     "Send a trusted local Scout to check it, move it, meet it, or wait for it—when you can't be there yourself.",
   alternates: { canonical: "/" },
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   openGraph: {
     title: "Send a Scout | Your trusted local presence, on demand",
     description: "Need someone there? Send a vetted local Scout.",

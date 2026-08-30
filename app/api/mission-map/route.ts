@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { missions, scoutProfiles } from "@/db/schema";
@@ -17,8 +17,20 @@ export async function GET(request: Request) {
 
   let allowed = mission.customerId === user.id || mission.scoutId === user.id || user.role === "admin";
   if (!allowed && user.role === "scout" && mission.status === "open" && !mission.scoutId) {
-    const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-    allowed = Boolean(profile && profile.status === "approved" && isMissionEligibleForScout(mission, profile));
+    const [[profile], itinerary] = await Promise.all([
+      db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
+      mission.bundleId
+        ? db.select().from(missions).where(and(eq(missions.bundleId, mission.bundleId), isNull(missions.archivedAt)))
+        : Promise.resolve([mission]),
+    ]);
+    const privateFirstLook = itinerary.some((leg) => Boolean(
+      leg.preferredScoutId
+      && leg.preferredScoutId !== user.id
+      && !leg.preferredScoutBroadcastAt
+      && leg.preferredScoutExclusiveUntil
+      && leg.preferredScoutExclusiveUntil.getTime() > Date.now(),
+    ));
+    allowed = Boolean(!privateFirstLook && profile && profile.status === "approved" && itinerary.every((leg) => isMissionEligibleForScout(leg, profile)));
   }
   if (!allowed) return NextResponse.json({ error: "You cannot view this mission map." }, { status: 403 });
 
@@ -35,8 +47,8 @@ export async function GET(request: Request) {
 
   if (mission.type === "move" && mission.dropoffLatitude && mission.dropoffLongitude) {
     const dropoff = coordinatePair(mission.dropoffLatitude, mission.dropoffLongitude, planningView);
-    let routePolyline = mission.routePolyline;
-    if (!routePolyline) {
+    let routePolyline = planningView ? null : mission.routePolyline;
+    if (!planningView && !routePolyline) {
       try {
         const route = await computeDrivingRoute(
           { latitude: Number(mission.pickupLatitude), longitude: Number(mission.pickupLongitude) },
@@ -51,6 +63,7 @@ export async function GET(request: Request) {
     mapUrl.searchParams.append("markers", `color:0x087f78|label:P|${pickup}`);
     mapUrl.searchParams.append("markers", `color:0xf05a28|label:D|${dropoff}`);
     if (routePolyline) mapUrl.searchParams.set("path", `color:0x087f78ff|weight:5|enc:${routePolyline}`);
+    else if (planningView) mapUrl.searchParams.set("path", `color:0x087f78aa|weight:4|${pickup}|${dropoff}`);
   } else {
     mapUrl.searchParams.set("zoom", "14");
     mapUrl.searchParams.set("center", pickup);

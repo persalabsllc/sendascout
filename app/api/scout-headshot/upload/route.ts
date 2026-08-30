@@ -1,5 +1,8 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { getDb } from "@/db";
+import { missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export async function POST(request: Request) {
@@ -11,11 +14,43 @@ export async function POST(request: Request) {
       onBeforeGenerateToken: async (pathname) => {
         const user = await requireAppUser("scout");
         if (user.role !== "scout" && user.role !== "admin") throw new Error("Only Scouts can upload a profile photo.");
-        if (!pathname.startsWith("scout-headshots/upload/") || pathname.includes("..")) throw new Error("Invalid profile photo path.");
+        if (!pathname.startsWith(`scout-headshots/${user.id}/`) || pathname.includes("..")) throw new Error("Invalid profile photo path.");
+        const [activeMission] = await getDb().select({ id: missions.id }).from(missions).where(and(
+          eq(missions.scoutId, user.id),
+          inArray(missions.status, ["claimed", "en_route", "onsite", "en_route_pickup", "at_pickup", "en_route_dropoff", "at_dropoff", "submitted", "disputed"]),
+          isNull(missions.archivedAt),
+        )).limit(1);
+        if (activeMission) throw new Error("Finish or resolve your active mission before changing the verified photo customers rely on.");
+        const now = new Date();
+        const windowCutoff = new Date(now.getTime() - 60 * 60 * 1000);
+        const [authorized] = await getDb().update(scoutProfiles).set({
+          headshotUploadWindowStartedAt: sql`CASE
+            WHEN ${scoutProfiles.headshotUploadWindowStartedAt} IS NULL OR ${scoutProfiles.headshotUploadWindowStartedAt} < ${windowCutoff}
+            THEN ${now}
+            ELSE ${scoutProfiles.headshotUploadWindowStartedAt}
+          END`,
+          headshotUploadCount: sql`CASE
+            WHEN ${scoutProfiles.headshotUploadWindowStartedAt} IS NULL OR ${scoutProfiles.headshotUploadWindowStartedAt} < ${windowCutoff}
+            THEN 1
+            ELSE ${scoutProfiles.headshotUploadCount} + 1
+          END`,
+          updatedAt: now,
+        }).where(and(
+          eq(scoutProfiles.userId, user.id),
+          ne(scoutProfiles.status, "rejected"),
+          or(
+            isNull(scoutProfiles.headshotUploadWindowStartedAt),
+            lt(scoutProfiles.headshotUploadWindowStartedAt, windowCutoff),
+            lt(scoutProfiles.headshotUploadCount, 3),
+          ),
+        )).returning({ id: scoutProfiles.id });
+        if (!authorized) throw new Error("Profile photo uploads are limited to three per hour. Try again later or contact support.");
         return {
-          allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "image/heic"],
-          maximumSizeInBytes: 10 * 1024 * 1024,
-          addRandomSuffix: true,
+          allowedContentTypes: ["image/jpeg", "image/png", "image/webp"],
+          maximumSizeInBytes: 5 * 1024 * 1024,
+          validUntil: Date.now() + 10 * 60 * 1000,
+          addRandomSuffix: false,
+          allowOverwrite: false,
           tokenPayload: JSON.stringify({ scoutId: user.id }),
         };
       },

@@ -27,8 +27,6 @@ export async function requireAuthenticatedAppUser(preferredRole: AppRole = "cust
       .update(users)
       .set({
         clerkUserId: userId,
-        firstName: clerkUser.firstName ?? existing.firstName,
-        lastName: clerkUser.lastName ?? existing.lastName,
         email,
         updatedAt: new Date(),
       })

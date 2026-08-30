@@ -2,7 +2,7 @@ import { get } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { missionUpdates, missions } from "@/db/schema";
+import { missionEvidence, missionUpdates, missions } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export async function GET(request: NextRequest) {
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
 
     const user = await requireAppUser("customer");
     const db = getDb();
-    const [[mission], [evidence]] = await Promise.all([
+    const [[mission], [legacyEvidence], [semanticEvidence]] = await Promise.all([
       db.select({ customerId: missions.customerId, scoutId: missions.scoutId })
         .from(missions)
         .where(eq(missions.id, missionId))
@@ -24,10 +24,20 @@ export async function GET(request: NextRequest) {
         .from(missionUpdates)
         .where(and(eq(missionUpdates.missionId, missionId), eq(missionUpdates.mediaUrl, pathname)))
         .limit(1),
+      db.select({ id: missionEvidence.id, customerVisible: missionEvidence.customerVisible })
+        .from(missionEvidence)
+        .where(and(eq(missionEvidence.missionId, missionId), eq(missionEvidence.storagePath, pathname)))
+        .limit(1),
     ]);
 
     const participant = mission && (mission.customerId === user.id || mission.scoutId === user.id || user.role === "admin");
-    if (!participant || !evidence) return new NextResponse("Not found", { status: 404 });
+    const semanticAccess = semanticEvidence && (
+      user.role === "admin"
+      || mission?.scoutId === user.id
+      || (mission?.customerId === user.id && semanticEvidence.customerVisible)
+    );
+    const evidenceAccess = semanticEvidence ? semanticAccess : Boolean(legacyEvidence && participant);
+    if (!participant || !evidenceAccess) return new NextResponse("Not found", { status: 404 });
 
     const result = await get(pathname, {
       access: "private",

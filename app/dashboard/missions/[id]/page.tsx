@@ -1,8 +1,21 @@
-import { and, asc, count, eq, or, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, or, isNotNull, isNull, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
-import { missionMessages, missionReviews, missions, missionUpdates, scoutProfiles, users } from "@/db/schema";
+import {
+  customerPreferredScouts,
+  missionBundles,
+  missionChangeOrders,
+  missionChecklistItems,
+  missionEvidence,
+  missionMessages,
+  missionPartResults,
+  missionReviews,
+  missions,
+  missionUpdates,
+  scoutProfiles,
+  users,
+} from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
@@ -14,6 +27,14 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   const db = getDb();
   const [mission] = await db.select().from(missions).where(eq(missions.id, id)).limit(1);
   if (!mission) notFound();
+  const [bundleRows, itineraryRows] = await Promise.all([
+    mission.bundleId ? db.select().from(missionBundles).where(eq(missionBundles.id, mission.bundleId)).limit(1) : Promise.resolve([]),
+    mission.bundleId
+      ? db.select().from(missions).where(and(eq(missions.bundleId, mission.bundleId), isNull(missions.archivedAt))).orderBy(asc(missions.bundleSequence))
+      : Promise.resolve([]),
+  ]);
+  const bundle = bundleRows[0] ?? null;
+  const itinerary = itineraryRows.length ? itineraryRows : [mission];
 
   let role: "customer" | "scout" | "admin";
   let canClaim = false;
@@ -21,17 +42,27 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   else if (mission.scoutId === user.id) role = "scout";
   else if (user.role === "admin") role = "admin";
   else if (user.role === "scout" && mission.status === "open" && !mission.scoutId) {
-    const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-    if (!profile || profile.status !== "approved" || !isMissionEligibleForScout(mission, profile)) notFound();
+    const [[profile], claimWindows] = await Promise.all([
+      db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
+      db.select({ available: sql<boolean>`(
+        ${missions.preferredScoutId} IS NULL
+        OR ${missions.preferredScoutId} = ${user.id}
+        OR ${missions.preferredScoutBroadcastAt} IS NOT NULL
+        OR ${missions.preferredScoutExclusiveUntil} IS NULL
+        OR ${missions.preferredScoutExclusiveUntil} <= now()
+      )` }).from(missions).where(inArray(missions.id, itinerary.map((leg) => leg.id))),
+    ]);
+    if (!profile || profile.status !== "approved" || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
     role = "scout";
     canClaim = true;
   } else notFound();
+  const finalLeg = itinerary.at(-1) ?? mission;
+  const reviewMissionId = finalLeg.id;
 
-  const [[customer], scoutRows, assignedProfileRows, completedMissionRows, messageRows, resultRows, reviewRows] = await Promise.all([
+  const [[customer], scoutRows, assignedProfileRows, messageRows, resultRows, partResultRows, reviewRows, checklistRows, evidenceRows, changeOrderRows, preferredScoutRows] = await Promise.all([
     db.select().from(users).where(eq(users.id, mission.customerId)).limit(1),
     mission.scoutId ? db.select().from(users).where(eq(users.id, mission.scoutId)).limit(1) : Promise.resolve([]),
-    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount, identityCheck: scoutProfiles.identityCheck }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
-    mission.scoutId ? db.select({ value: count() }).from(missions).where(and(eq(missions.scoutId, mission.scoutId), eq(missions.status, "completed"))) : Promise.resolve([{ value: 0 }]),
+    mission.scoutId ? db.select({ headshotPath: scoutProfiles.headshotPath, rating: scoutProfiles.rating, ratingCount: scoutProfiles.ratingCount, identityCheck: scoutProfiles.identityCheck, identityVerifiedName: scoutProfiles.identityVerifiedName, completedMissions: scoutProfiles.completedMissions }).from(scoutProfiles).where(eq(scoutProfiles.userId, mission.scoutId)).limit(1) : Promise.resolve([]),
     mission.scoutId || role === "admin"
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
           .from(missionMessages).where(eq(missionMessages.missionId, mission.id)).orderBy(asc(missionMessages.createdAt))
@@ -40,7 +71,12 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       .from(missionUpdates)
       .where(and(eq(missionUpdates.missionId, mission.id), or(eq(missionUpdates.status, "submitted"), isNotNull(missionUpdates.mediaUrl))))
       .orderBy(asc(missionUpdates.createdAt)),
-    db.select({ rating: missionReviews.rating, review: missionReviews.review, tipCents: missionReviews.tipCents }).from(missionReviews).where(eq(missionReviews.missionId, mission.id)).limit(1),
+    db.select({ summary: missionPartResults.summary, submittedAt: missionPartResults.submittedAt }).from(missionPartResults).where(eq(missionPartResults.missionId, mission.id)).limit(1),
+    db.select({ rating: missionReviews.rating, review: missionReviews.review, tipCents: missionReviews.tipCents }).from(missionReviews).where(eq(missionReviews.missionId, reviewMissionId)).limit(1),
+    db.select().from(missionChecklistItems).where(eq(missionChecklistItems.missionId, mission.id)).orderBy(asc(missionChecklistItems.sequence)),
+    db.select().from(missionEvidence).where(eq(missionEvidence.missionId, mission.id)).orderBy(asc(missionEvidence.createdAt)),
+    db.select().from(missionChangeOrders).where(eq(missionChangeOrders.missionId, mission.id)).orderBy(asc(missionChangeOrders.createdAt)),
+    mission.scoutId ? db.select({ id: customerPreferredScouts.id }).from(customerPreferredScouts).where(and(eq(customerPreferredScouts.customerId, mission.customerId), eq(customerPreferredScouts.scoutId, mission.scoutId))).limit(1) : Promise.resolve([]),
   ]);
   const scout = scoutRows[0];
   const assignedProfile = assignedProfileRows[0];
@@ -59,6 +95,11 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   const pickupMapLongitude = mapCoordinate(mission.pickupLongitude);
   const dropoffMapLatitude = mapCoordinate(mission.dropoffLatitude);
   const dropoffMapLongitude = mapCoordinate(mission.dropoffLongitude);
+  const semanticEvidencePaths = new Set(evidenceRows.map((item) => item.storagePath));
+  const accessibleEvidenceRows = role === "customer" ? evidenceRows.filter((item) => item.customerVisible) : evidenceRows;
+  const deliveryProofRows = accessibleEvidenceRows.filter((item) => item.kind === "delivery_photo");
+  const isActiveBundleLeg = !bundle || mission.bundleSequence === bundle.activeSequence;
+  const isFinalBundleLeg = !bundle || mission.id === finalLeg.id;
 
   return <MissionWorkspace
     role={role}
@@ -76,6 +117,8 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       scheduledFor: mission.scheduledFor?.toISOString() ?? null,
       customerPriceCents: mission.customerPriceCents,
       scoutPayoutCents: mission.scoutPayoutCents,
+      claimScoutPayoutCents: bundle?.scoutPayoutCents ?? mission.scoutPayoutCents,
+      claimCustomerPriceCents: bundle?.customerPriceCents ?? mission.customerPriceCents,
       largeItem: mission.largeItem,
       routeDistanceMeters: mission.routeDistanceMeters,
       routeDurationSeconds: mission.routeDurationSeconds,
@@ -95,13 +138,49 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       locationUpdatedAt: mission.scoutLocationUpdatedAt?.toISOString() ?? null,
       directionsUrl: mapDirectionsUrl(mission.type, pickupMapLatitude, pickupMapLongitude, dropoffMapLatitude, dropoffMapLongitude),
       customerName: customer?.firstName || "Customer",
-      scoutName: scout?.firstName || null,
-      scoutHeadshotUrl: scout && assignedProfile?.headshotPath ? `/api/scout-headshot?scoutId=${encodeURIComponent(scout.id)}` : null,
-      scoutCompletedMissions: completedMissionRows[0]?.value ?? 0,
+      scoutName: mission.scoutDisplayNameSnapshot
+        ? mission.scoutDisplayNameSnapshot.trim().split(/\s+/)[0]
+        : assignedProfile?.identityCheck === "clear" && assignedProfile.identityVerifiedName
+          ? assignedProfile.identityVerifiedName.trim().split(/\s+/)[0]
+        : scout?.firstName || null,
+      scoutHeadshotUrl: scout && (mission.scoutHeadshotPathSnapshot || assignedProfile?.headshotPath) ? `/api/scout-headshot?missionId=${encodeURIComponent(mission.id)}` : null,
+      scoutCompletedMissions: assignedProfile?.completedMissions ?? 0,
       scoutRating: assignedProfile?.rating ? Number(assignedProfile.rating) : null,
       scoutRatingCount: assignedProfile?.ratingCount ?? 0,
-      scoutIdentityVerified: assignedProfile?.identityCheck === "clear",
+      scoutIdentityVerified: Boolean(mission.scoutIdentityVerifiedAtSnapshot) || assignedProfile?.identityCheck === "clear",
+      proofOfDeliveryRequired: mission.proofOfDeliveryRequired,
+      deliveryPinRequired: mission.deliveryPinRequired,
+      deliveryPinVerified: Boolean(mission.deliveryPinVerifiedAt),
+      isActiveBundleLeg,
+      isFinalBundleLeg,
+      bookingCompleted: bundle ? bundle.status === "completed" : mission.status === "completed",
     }}
+    bundle={bundle ? {
+      id: bundle.id,
+      title: bundle.title,
+      status: bundle.status,
+      activeSequence: bundle.activeSequence,
+      totalLegs: itinerary.length,
+      listCustomerPriceCents: bundle.listCustomerPriceCents,
+      bundleDiscountCents: bundle.bundleDiscountCents,
+      customerPriceCents: bundle.customerPriceCents,
+      scoutPayoutCents: bundle.scoutPayoutCents,
+    } : null}
+    itinerary={itinerary.map((leg) => ({
+      id: leg.id,
+      sequence: leg.bundleSequence ?? 1,
+      type: leg.type,
+      status: leg.status,
+      title: leg.title,
+      pickup: showFullAddress
+        ? formatLocation(leg.pickupName, leg.addressLine1, leg.addressLine2, leg.city, leg.state, leg.zip)
+        : `${leg.city}, ${leg.state} ${leg.zip}`,
+      dropoff: leg.type === "move" && leg.dropoffAddressLine1 && showFullAddress
+        ? formatLocation(leg.dropoffName, leg.dropoffAddressLine1, leg.dropoffAddressLine2, leg.dropoffCity, leg.dropoffState, leg.dropoffZip)
+        : null,
+      active: !bundle || leg.bundleSequence === bundle.activeSequence,
+      current: leg.id === mission.id,
+    }))}
     messages={messageRows.map((message) => ({
       id: message.id,
       body: message.body,
@@ -110,10 +189,36 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       createdAt: message.createdAt.toISOString(),
     }))}
     results={{
-      summary: resultRows.find((item) => item.message)?.message ?? null,
-      mediaUrls: resultRows.flatMap((item) => item.mediaUrl ? [privateMediaUrl(mission.id, item.mediaUrl)] : []),
-      submittedAt: resultRows[0]?.createdAt.toISOString() ?? null,
+      summary: partResultRows[0]?.summary ?? resultRows.find((item) => item.message)?.message ?? null,
+      mediaUrls: [
+        ...resultRows.flatMap((item) => item.mediaUrl && !semanticEvidencePaths.has(item.mediaUrl) ? [privateMediaUrl(mission.id, item.mediaUrl)] : []),
+        ...accessibleEvidenceRows.filter((item) => item.kind === "general_result").map((item) => privateMediaUrl(mission.id, item.storagePath)),
+      ],
+      submittedAt: partResultRows[0]?.submittedAt?.toISOString() ?? resultRows[0]?.createdAt.toISOString() ?? null,
     }}
+    deliveryProof={{
+      mediaUrls: deliveryProofRows.map((item) => privateMediaUrl(mission.id, item.storagePath)),
+      submittedAt: deliveryProofRows[0]?.createdAt.toISOString() ?? null,
+    }}
+    checklist={checklistRows.map((item) => ({
+      id: item.id,
+      sequence: item.sequence,
+      prompt: item.prompt,
+      responseType: item.responseType,
+      required: item.required,
+      responseText: item.responseText,
+      mediaUrls: accessibleEvidenceRows.filter((evidence) => evidence.checklistItemId === item.id).map((evidence) => privateMediaUrl(mission.id, evidence.storagePath)),
+    }))}
+    changeOrders={changeOrderRows.map((order) => ({
+      id: order.id,
+      status: order.status,
+      description: order.description,
+      customerDeltaCents: order.customerDeltaCents,
+      scoutDeltaCents: order.scoutDeltaCents,
+      proposedByMe: order.proposedByUserId === user.id,
+      expiresAt: order.expiresAt?.toISOString() ?? null,
+    }))}
+    scoutPreferred={Boolean(preferredScoutRows[0])}
     review={reviewRows[0] ?? null}
   />;
 }

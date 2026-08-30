@@ -1,7 +1,11 @@
+import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -106,14 +110,145 @@ export const scoutProfiles = pgTable("scout_profiles", {
   ratingCount: integer("rating_count").notNull().default(0),
   completedMissions: integer("completed_missions").notNull().default(0),
   headshotPath: text("headshot_path"),
+  headshotUploadWindowStartedAt: timestamp("headshot_upload_window_started_at", { withTimezone: true }),
+  headshotUploadCount: integer("headshot_upload_count").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [uniqueIndex("scout_profiles_user_id_idx").on(table.userId)]);
+}, (table) => [
+  uniqueIndex("scout_profiles_user_id_idx").on(table.userId),
+  check("scout_profiles_headshot_upload_count_check", sql`${table.headshotUploadCount} >= 0`),
+]);
+
+export const businessAccounts = pgTable("business_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  ownerUserId: uuid("owner_user_id").notNull().references(() => users.id),
+  name: text("name").notNull(),
+  status: text("status").notNull().default("active"),
+  plan: text("plan").notNull().default("free"),
+  billingEmail: text("billing_email"),
+  stripeCustomerId: text("stripe_customer_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("business_accounts_owner_idx").on(table.ownerUserId),
+  uniqueIndex("business_accounts_stripe_customer_idx").on(table.stripeCustomerId),
+  check("business_accounts_status_check", sql`${table.status} IN ('active', 'paused', 'closed')`),
+]);
+
+export const businessMembers = pgTable("business_members", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  businessAccountId: uuid("business_account_id").notNull().references(() => businessAccounts.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  role: text("role").notNull().default("requester"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("business_members_account_user_idx").on(table.businessAccountId, table.userId),
+  index("business_members_user_idx").on(table.userId),
+  check("business_members_role_check", sql`${table.role} IN ('owner', 'admin', 'requester', 'viewer')`),
+]);
+
+export const customerSavedLocations = pgTable("customer_saved_locations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  businessAccountId: uuid("business_account_id").references(() => businessAccounts.id, { onDelete: "cascade" }),
+  label: text("label").notNull(),
+  addressLine1: text("address_line_1").notNull(),
+  addressLine2: text("address_line_2"),
+  city: text("city").notNull(),
+  state: text("state").notNull().default("NC"),
+  zip: text("zip").notNull(),
+  latitude: numeric("latitude", { precision: 9, scale: 6 }),
+  longitude: numeric("longitude", { precision: 9, scale: 6 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("customer_saved_locations_customer_idx").on(table.customerId),
+  index("customer_saved_locations_business_idx").on(table.businessAccountId),
+]);
+
+export const missionTemplates = pgTable("mission_templates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  businessAccountId: uuid("business_account_id").references(() => businessAccounts.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  type: missionType("type").notNull(),
+  configurationJson: jsonb("configuration_json").$type<Record<string, unknown>>().notNull(),
+  preferredScoutId: uuid("preferred_scout_id").references(() => users.id, { onDelete: "set null" }),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_templates_customer_idx").on(table.customerId),
+  index("mission_templates_business_idx").on(table.businessAccountId),
+]);
+
+export const missionRecurrences = pgTable("mission_recurrences", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  businessAccountId: uuid("business_account_id").references(() => businessAccounts.id, { onDelete: "cascade" }),
+  templateId: uuid("template_id").notNull().references(() => missionTemplates.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("active"),
+  recurrenceRule: text("recurrence_rule").notNull(),
+  timezone: text("timezone").notNull().default("America/New_York"),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  endsAt: timestamp("ends_at", { withTimezone: true }),
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  preferredScoutId: uuid("preferred_scout_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_recurrences_due_idx").on(table.status, table.nextRunAt),
+  index("mission_recurrences_customer_idx").on(table.customerId),
+  check("mission_recurrences_status_check", sql`${table.status} IN ('active', 'paused', 'ended')`),
+]);
+
+export const missionBundles = pgTable("mission_bundles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id),
+  businessAccountId: uuid("business_account_id").references(() => businessAccounts.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  status: text("status").notNull().default("draft"),
+  activeSequence: integer("active_sequence").notNull().default(1),
+  listCustomerPriceCents: integer("list_customer_price_cents").notNull().default(0),
+  bundleDiscountCents: integer("bundle_discount_cents").notNull().default(0),
+  customerPriceCents: integer("customer_price_cents").notNull().default(0),
+  scoutPayoutCents: integer("scout_payout_cents").notNull().default(0),
+  platformFeeCents: integer("platform_fee_cents").notNull().default(0),
+  paymentStatus: paymentStatus("payment_status").notNull().default("unpaid"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_bundles_customer_idx").on(table.customerId),
+  index("mission_bundles_business_idx").on(table.businessAccountId),
+  index("mission_bundles_status_idx").on(table.status),
+  uniqueIndex("mission_bundles_payment_intent_idx").on(table.stripePaymentIntentId),
+  check("mission_bundles_status_check", sql`${table.status} IN ('draft', 'open', 'claimed', 'in_progress', 'submitted', 'completed', 'cancelled', 'disputed')`),
+  check("mission_bundles_active_sequence_check", sql`${table.activeSequence} > 0`),
+  check("mission_bundles_amounts_check", sql`${table.listCustomerPriceCents} >= 0 AND ${table.bundleDiscountCents} >= 0 AND ${table.customerPriceCents} >= 0 AND ${table.scoutPayoutCents} >= 0 AND ${table.platformFeeCents} >= 0 AND ${table.bundleDiscountCents} <= ${table.listCustomerPriceCents} AND ${table.customerPriceCents} = ${table.listCustomerPriceCents} - ${table.bundleDiscountCents} AND ${table.platformFeeCents} = ${table.customerPriceCents} - ${table.scoutPayoutCents}`),
+]);
 
 export const missions = pgTable("missions", {
   id: uuid("id").defaultRandom().primaryKey(),
   customerId: uuid("customer_id").notNull().references(() => users.id),
   scoutId: uuid("scout_id").references(() => users.id),
+  bundleId: uuid("bundle_id").references(() => missionBundles.id),
+  bundleSequence: integer("bundle_sequence"),
+  predecessorMissionId: uuid("predecessor_mission_id").references((): AnyPgColumn => missions.id, { onDelete: "set null" }),
+  sourceMissionId: uuid("source_mission_id").references((): AnyPgColumn => missions.id, { onDelete: "set null" }),
+  templateId: uuid("template_id").references(() => missionTemplates.id, { onDelete: "set null" }),
+  recurrenceId: uuid("recurrence_id").references(() => missionRecurrences.id, { onDelete: "set null" }),
+  recurrenceOccurrenceAt: timestamp("recurrence_occurrence_at", { withTimezone: true }),
+  preferredScoutId: uuid("preferred_scout_id").references(() => users.id, { onDelete: "set null" }),
+  preferredScoutExclusiveUntil: timestamp("preferred_scout_exclusive_until", { withTimezone: true }),
+  preferredScoutBroadcastAt: timestamp("preferred_scout_broadcast_at", { withTimezone: true }),
+  scoutDisplayNameSnapshot: text("scout_display_name_snapshot"),
+  scoutHeadshotPathSnapshot: text("scout_headshot_path_snapshot"),
+  scoutIdentityVerifiedAtSnapshot: timestamp("scout_identity_verified_at_snapshot", { withTimezone: true }),
   type: missionType("type").notNull(),
   status: missionStatus("status").notNull().default("draft"),
   title: text("title").notNull(),
@@ -132,6 +267,16 @@ export const missions = pgTable("missions", {
   dropoffState: text("dropoff_state"),
   dropoffZip: text("dropoff_zip"),
   deliveryInstructions: text("delivery_instructions"),
+  deliveryPinRequired: boolean("delivery_pin_required").notNull().default(false),
+  deliveryPinHash: text("delivery_pin_hash"),
+  deliveryPinHint: text("delivery_pin_hint"),
+  deliveryPinFailedAttempts: integer("delivery_pin_failed_attempts").notNull().default(0),
+  deliveryPinLockedUntil: timestamp("delivery_pin_locked_until", { withTimezone: true }),
+  deliveryPinVerifiedAt: timestamp("delivery_pin_verified_at", { withTimezone: true }),
+  deliveryPinVerifiedBy: uuid("delivery_pin_verified_by").references(() => users.id, { onDelete: "set null" }),
+  proofOfDeliveryRequired: boolean("proof_of_delivery_required").notNull().default(false),
+  enhancedReportRequested: boolean("enhanced_report_requested").notNull().default(false),
+  resultUploadTokenCount: integer("result_upload_token_count").notNull().default(0),
   largeItem: boolean("large_item").notNull().default(false),
   scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
   pickupLatitude: numeric("pickup_latitude", { precision: 9, scale: 6 }),
@@ -160,6 +305,8 @@ export const missions = pgTable("missions", {
   verifiedCheckOutLongitude: numeric("verified_check_out_longitude", { precision: 9, scale: 6 }),
   verifiedCheckOutAccuracyMeters: integer("verified_check_out_accuracy_meters"),
   customerPriceCents: integer("customer_price_cents").notNull(),
+  listCustomerPriceCents: integer("list_customer_price_cents"),
+  bundleDiscountCents: integer("bundle_discount_cents").notNull().default(0),
   scoutPayoutCents: integer("scout_payout_cents").notNull(),
   platformFeeCents: integer("platform_fee_cents").notNull(),
   paymentStatus: paymentStatus("payment_status").notNull().default("unpaid"),
@@ -172,6 +319,8 @@ export const missions = pgTable("missions", {
   claimedAt: timestamp("claimed_at", { withTimezone: true }),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
   completedAt: timestamp("completed_at", { withTimezone: true }),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  archivedReason: text("archived_reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [
@@ -179,6 +328,21 @@ export const missions = pgTable("missions", {
   index("missions_customer_idx").on(table.customerId),
   index("missions_scout_idx").on(table.scoutId),
   index("missions_zip_idx").on(table.zip),
+  index("missions_archived_idx").on(table.archivedAt),
+  index("missions_bundle_idx").on(table.bundleId),
+  uniqueIndex("missions_bundle_sequence_idx").on(table.bundleId, table.bundleSequence),
+  index("missions_predecessor_idx").on(table.predecessorMissionId),
+  index("missions_template_idx").on(table.templateId),
+  index("missions_recurrence_idx").on(table.recurrenceId),
+  uniqueIndex("missions_recurrence_occurrence_idx").on(table.recurrenceId, table.recurrenceOccurrenceAt),
+  index("missions_preferred_scout_idx").on(table.preferredScoutId, table.preferredScoutExclusiveUntil),
+  check("missions_bundle_pair_check", sql`(${table.bundleId} IS NULL AND ${table.bundleSequence} IS NULL) OR (${table.bundleId} IS NOT NULL AND ${table.bundleSequence} IS NOT NULL AND ${table.bundleSequence} > 0)`),
+  check("missions_delivery_pin_check", sql`NOT ${table.deliveryPinRequired} OR (${table.type} = 'move' AND ${table.deliveryPinHash} IS NOT NULL)`),
+  check("missions_delivery_pin_attempts_check", sql`${table.deliveryPinFailedAttempts} >= 0`),
+  check("missions_result_upload_token_count_check", sql`${table.resultUploadTokenCount} >= 0 AND ${table.resultUploadTokenCount} <= 30`),
+  check("missions_proof_delivery_check", sql`NOT ${table.proofOfDeliveryRequired} OR ${table.type} = 'move'`),
+  check("missions_financial_amounts_check", sql`${table.customerPriceCents} >= 0 AND ${table.scoutPayoutCents} >= 0 AND ${table.platformFeeCents} >= 0 AND ${table.customerPriceCents} = ${table.scoutPayoutCents} + ${table.platformFeeCents}`),
+  check("missions_feature_pricing_check", sql`${table.bundleDiscountCents} >= 0 AND (${table.listCustomerPriceCents} IS NULL OR (${table.listCustomerPriceCents} >= 0 AND ${table.bundleDiscountCents} <= ${table.listCustomerPriceCents}))`),
 ]);
 
 export const missionUpdates = pgTable("mission_updates", {
@@ -188,8 +352,104 @@ export const missionUpdates = pgTable("mission_updates", {
   status: missionStatus("status"),
   message: text("message"),
   mediaUrl: text("media_url"),
+  evidenceKind: text("evidence_kind"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (table) => [index("mission_updates_mission_idx").on(table.missionId)]);
+
+export const customerPreferredScouts = pgTable("customer_preferred_scouts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  scoutId: uuid("scout_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sourceMissionId: uuid("source_mission_id").references(() => missions.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("customer_preferred_scouts_pair_idx").on(table.customerId, table.scoutId),
+  index("customer_preferred_scouts_scout_idx").on(table.scoutId),
+  check("customer_preferred_scouts_distinct_users_check", sql`${table.customerId} <> ${table.scoutId}`),
+]);
+
+export const missionChangeOrders = pgTable("mission_change_orders", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  proposedByUserId: uuid("proposed_by_user_id").notNull().references(() => users.id),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("pending"),
+  description: text("description").notNull(),
+  customerDeltaCents: integer("customer_delta_cents").notNull().default(0),
+  scoutDeltaCents: integer("scout_delta_cents").notNull().default(0),
+  platformDeltaCents: integer("platform_delta_cents").notNull().default(0),
+  linkedMissionId: uuid("linked_mission_id").references(() => missions.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  declinedAt: timestamp("declined_at", { withTimezone: true }),
+  fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_change_orders_mission_idx").on(table.missionId),
+  index("mission_change_orders_status_idx").on(table.status),
+  uniqueIndex("mission_change_orders_one_pending_idx").on(table.missionId).where(sql`${table.status} = 'pending'`),
+  check("mission_change_orders_status_check", sql`${table.status} IN ('pending', 'approved', 'declined', 'expired', 'fulfilled', 'cancelled')`),
+  check("mission_change_orders_amounts_check", sql`${table.customerDeltaCents} >= 0 AND ${table.scoutDeltaCents} >= 0 AND ${table.platformDeltaCents} >= 0 AND ${table.customerDeltaCents} = ${table.scoutDeltaCents} + ${table.platformDeltaCents}`),
+]);
+
+export const missionPartResults = pgTable("mission_part_results", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("draft"),
+  summary: text("summary"),
+  submittedByUserId: uuid("submitted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("mission_part_results_mission_idx").on(table.missionId),
+  check("mission_part_results_status_check", sql`${table.status} IN ('draft', 'submitted', 'accepted', 'rejected')`),
+]);
+
+export const missionChecklistItems = pgTable("mission_checklist_items", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  prompt: text("prompt").notNull(),
+  responseType: text("response_type").notNull().default("check"),
+  required: boolean("required").notNull().default(true),
+  responseText: text("response_text"),
+  completedByUserId: uuid("completed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("mission_checklist_items_sequence_idx").on(table.missionId, table.sequence),
+  check("mission_checklist_items_sequence_check", sql`${table.sequence} > 0`),
+  check("mission_checklist_items_response_type_check", sql`${table.responseType} IN ('check', 'text', 'photo', 'video', 'number')`),
+]);
+
+export const missionEvidence = pgTable("mission_evidence", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  missionUpdateId: uuid("mission_update_id").references(() => missionUpdates.id, { onDelete: "set null" }),
+  checklistItemId: uuid("checklist_item_id").references(() => missionChecklistItems.id, { onDelete: "set null" }),
+  uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  kind: text("kind").notNull().default("general_result"),
+  storagePath: text("storage_path").notNull(),
+  contentType: text("content_type"),
+  byteSize: integer("byte_size"),
+  caption: text("caption"),
+  capturedAt: timestamp("captured_at", { withTimezone: true }),
+  latitude: numeric("latitude", { precision: 9, scale: 6 }),
+  longitude: numeric("longitude", { precision: 9, scale: 6 }),
+  customerVisible: boolean("customer_visible").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("mission_evidence_storage_path_idx").on(table.storagePath),
+  index("mission_evidence_mission_kind_idx").on(table.missionId, table.kind),
+  index("mission_evidence_checklist_idx").on(table.checklistItemId),
+  check("mission_evidence_kind_check", sql`${table.kind} IN ('general_result', 'delivery_photo', 'checklist_photo', 'checklist_video', 'signature')`),
+  check("mission_evidence_byte_size_check", sql`${table.byteSize} IS NULL OR ${table.byteSize} >= 0`),
+]);
 
 export const missionMessages = pgTable("mission_messages", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -217,6 +477,28 @@ export const missionReviews = pgTable("mission_reviews", {
   index("mission_reviews_scout_idx").on(table.scoutId),
 ]);
 
+export const missionCases = pgTable("mission_cases", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  missionId: uuid("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
+  reporterId: uuid("reporter_id").notNull().references(() => users.id),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("open"),
+  previousMissionStatus: text("previous_mission_status").notNull(),
+  summary: text("summary").notNull(),
+  adminNotes: text("admin_notes"),
+  resolution: text("resolution"),
+  refundAmountCents: integer("refund_amount_cents").notNull().default(0),
+  payoutAmountCents: integer("payout_amount_cents").notNull().default(0),
+  resolvedBy: uuid("resolved_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  index("mission_cases_mission_idx").on(table.missionId),
+  index("mission_cases_status_idx").on(table.status),
+  index("mission_cases_reporter_idx").on(table.reporterId),
+]);
+
 export const notifications = pgTable("notifications", {
   id: uuid("id").defaultRandom().primaryKey(),
   recipientUserId: uuid("recipient_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -226,8 +508,12 @@ export const notifications = pgTable("notifications", {
   kind: text("kind").notNull(),
   title: text("title").notNull(),
   body: text("body").notNull(),
+  actionLabel: text("action_label"),
+  actionUrl: text("action_url"),
   providerMessageId: text("provider_message_id"),
   error: text("error"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   sentAt: timestamp("sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -250,4 +536,26 @@ export const payments = pgTable("payments", {
 }, (table) => [
   uniqueIndex("payments_payment_intent_idx").on(table.stripePaymentIntentId),
   index("payments_mission_idx").on(table.missionId),
+]);
+
+export const operationalEvents = pgTable("operational_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  severity: text("severity").notNull().default("error"),
+  category: text("category").notNull(),
+  message: text("message").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  contextJson: text("context_json"),
+  status: text("status").notNull().default("open"),
+  occurrenceCount: integer("occurrence_count").notNull().default(1),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).defaultNow().notNull(),
+  alertedAt: timestamp("alerted_at", { withTimezone: true }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  acknowledgedBy: uuid("acknowledged_by").references(() => users.id),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("operational_events_fingerprint_idx").on(table.fingerprint),
+  index("operational_events_status_idx").on(table.status),
+  index("operational_events_last_seen_idx").on(table.lastSeenAt),
 ]);

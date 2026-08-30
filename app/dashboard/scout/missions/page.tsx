@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { IconCamera, IconMapPin, IconRoute, IconClock } from "@tabler/icons-react";
 import { ScoutDashboardShell } from "@/components/scout-dashboard-shell";
 import { getDb } from "@/db";
-import { missions, scoutProfiles } from "@/db/schema";
+import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 
@@ -13,8 +13,40 @@ export default async function ScoutMissionsPage() {
   const user = await requireAppUser("scout");
   const db = getDb();
   const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-  const rows = await db.select().from(missions).where(or(eq(missions.status, "open"), eq(missions.scoutId, user.id))).orderBy(desc(missions.createdAt));
-  const eligible = rows.filter((mission) => mission.scoutId === user.id || (profile?.status === "approved" && isMissionEligibleForScout(mission, profile)));
+  const rows = await db.select().from(missions).where(and(isNull(missions.archivedAt), or(
+    eq(missions.scoutId, user.id),
+    and(eq(missions.status, "open"), or(
+      isNull(missions.preferredScoutId),
+      eq(missions.preferredScoutId, user.id),
+      isNotNull(missions.preferredScoutBroadcastAt),
+      lte(missions.preferredScoutExclusiveUntil, sql`now()`),
+    )),
+  ))).orderBy(desc(missions.createdAt));
+  const bundleIds = [...new Set(rows.flatMap((mission) => mission.bundleId ? [mission.bundleId] : []))];
+  const [bundleRows, bundleLegs] = bundleIds.length
+    ? await Promise.all([
+      db.select().from(missionBundles).where(inArray(missionBundles.id, bundleIds)),
+      db.select().from(missions).where(and(inArray(missions.bundleId, bundleIds), isNull(missions.archivedAt))),
+    ])
+    : [[], []];
+  const bundleById = new Map(bundleRows.map((bundle) => [bundle.id, bundle]));
+  const legsByBundle = new Map<string, typeof bundleLegs>();
+  for (const leg of bundleLegs) {
+    if (!leg.bundleId) continue;
+    const list = legsByBundle.get(leg.bundleId) ?? [];
+    list.push(leg);
+    legsByBundle.set(leg.bundleId, list);
+  }
+  const eligible = rows.filter((mission) => {
+    if (mission.bundleId && mission.bundleSequence !== bundleById.get(mission.bundleId)?.activeSequence) return false;
+    if (mission.scoutId === user.id) return true;
+    if (profile?.status !== "approved") return false;
+    const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
+    return legs.every((leg) => isMissionEligibleForScout(leg, profile));
+  }).map((mission) => {
+    const bundle = mission.bundleId ? bundleById.get(mission.bundleId) : null;
+    return bundle ? { ...mission, title: bundle.title, scoutPayoutCents: bundle.scoutPayoutCents } : mission;
+  });
   const active = eligible.filter((mission) => mission.scoutId === user.id && !["completed", "cancelled", "disputed"].includes(mission.status));
   const open = eligible.filter((mission) => mission.status === "open" && !mission.scoutId);
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Scout";

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   IconArrowRight, IconBell, IconCamera, IconCircleCheck, IconClock, IconCoin,
-  IconDashboard, IconMapPin, IconPlus, IconRoute, IconSettings,
+  IconBuildingStore, IconCalendarRepeat, IconDashboard, IconMapPin, IconPlus, IconRoute, IconSettings,
   IconShieldCheck, IconTargetArrow, IconUser, IconWallet,
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
@@ -20,6 +20,8 @@ export type DashboardMission = {
   time: string;
   payoutCents?: number;
   assigned?: boolean;
+  bundleParts?: number;
+  bundleLabel?: string;
 };
 
 export type DashboardNotification = {
@@ -59,6 +61,8 @@ export function Dashboard({
         <nav>
           <Link className="active" href={scout ? "/dashboard/scout" : "/dashboard/customer"}><IconDashboard size={20} /> Overview</Link>
           <Link href={scout ? "/dashboard/scout/missions" : "/dashboard/customer"}><IconTargetArrow size={20} /> {scout ? "Mission board" : "My missions"}</Link>
+          {!scout && <Link href="/dashboard/customer/saved"><IconCalendarRepeat size={20} /> Saved &amp; recurring</Link>}
+          {!scout && <Link href="/dashboard/customer/business"><IconBuildingStore size={20} /> Business</Link>}
           <Link href={scout ? "/dashboard/scout/earnings" : "/dashboard/customer/payments"}><IconWallet size={20} /> {scout ? "Earnings" : "Payments"}</Link>
           <Link href={scout ? "/dashboard/scout/settings" : "/dashboard/customer/profile"}><IconUser size={20} /> Profile</Link>
         </nav>
@@ -71,7 +75,7 @@ export function Dashboard({
       <section className="dash-main">
         <header className="dash-header">
           <MobileDashboardNav initials={initials} name={userName} role={role} />
-          <div><span className="dash-alert"><IconBell size={20} /></span><UserButton /></div>
+          <div><Link aria-label={`Notifications${notifications.length ? `, ${notifications.length} unread` : ""}`} className={`dash-alert ${notifications.length ? "has-alerts" : ""}`} href="/dashboard/notifications"><IconBell size={20} />{notifications.length > 0 && <span>{notifications.length > 9 ? "9+" : notifications.length}</span>}</Link><UserButton /></div>
         </header>
         <div className="dash-content">
           <div className="dash-welcome">
@@ -80,7 +84,7 @@ export function Dashboard({
               ? scoutMission && <Link className="button" href={`/dashboard/missions/${scoutMission.id}`}>{scoutMission.assigned ? "Continue mission" : "Review next mission"} <IconArrowRight size={19} /></Link>
               : <Link className="button" href="/request">New mission <IconPlus size={19} /></Link>}
           </div>
-          {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div>{notifications[0].missionId && <Link href={`/dashboard/missions/${notifications[0].missionId}`}>Open <IconArrowRight size={17} /></Link>}</section>}
+          {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div><Link href={notifications[0].missionId ? `/dashboard/missions/${notifications[0].missionId}` : "/dashboard/notifications"}>{notifications[0].missionId ? "Open" : "View all"} <IconArrowRight size={17} /></Link></section>}
           {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
@@ -101,9 +105,10 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
       <div className="dash-section-title"><div><h2>Your missions</h2><p>Drafts and active work in one place.</p></div><Link href="/request">Create mission <IconArrowRight size={17} /></Link></div>
       {missions.length ? <div className="mission-list">{missions.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></Link>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.bundleLabel ?? labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></Link>;
       })}</div> : <EmptyMissions customer />}
     </section>
+    <div className="empty-prompt"><span><IconCalendarRepeat size={30} /></span><div><h3>Saved missions and repeat schedules</h3><p>Reuse a template, review recurring work, or book a completed mission again.</p></div><Link className="button button-ghost button-small" href="/dashboard/customer/saved">Open saved</Link></div>
     <div className="empty-prompt" id="payments"><span><IconShieldCheck size={30} /></span><div><h3>Payments activate at launch</h3><p>Customer payment will be authorized when a Scout accepts and released after successful completion.</p></div></div>
   </>;
 }

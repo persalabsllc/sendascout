@@ -27,7 +27,7 @@ function ScoutAccess() {
       <h1>Earn locally. Work flexibly.</h1>
       <p>Existing Scouts can return to their mission dashboard. New Scouts can create an account and complete the application.</p>
       <div className="role-access-actions">
-        <Link className="button" href="/sign-in?redirect_url=/dashboard/scout">Scout login <IconArrowRight size={18} /></Link>
+        <Link className="button" href="/sign-in?portal=scout&redirect_url=/dashboard">Scout login <IconArrowRight size={18} /></Link>
         <Link className="button button-ghost" href="/sign-up?redirect_url=/scout">Apply to become a Scout</Link>
       </div>
       <small><IconShieldCheck size={15} /> Existing Scouts do not need to apply again.</small>

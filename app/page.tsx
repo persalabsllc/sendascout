@@ -14,6 +14,9 @@ import {
 } from "@tabler/icons-react";
 import { Brand } from "@/components/brand";
 
+const customerSignInUrl = "/sign-in?portal=customer&redirect_url=/dashboard";
+const scoutSignInUrl = "/sign-in?portal=scout&redirect_url=/dashboard";
+
 const missions = [
   {
     icon: IconCamera,
@@ -49,12 +52,18 @@ export default async function Home() {
           <a href="#missions">What Scouts do</a>
         </nav>
         <div className="header-actions">
-          {userId ? <Link className="text-link" href="/dashboard">Dashboard</Link> : <>
-            <Link className="text-link" href="/sign-in?redirect_url=/dashboard/customer">Customer login</Link>
-            <Link className="text-link scout-header-link" href="/sign-in?redirect_url=/dashboard/scout">Scout login</Link>
-          </>}
+          {userId ? <Link className="text-link desktop-account-link" href="/dashboard">Dashboard</Link> : <nav aria-label="Account sign in" className="desktop-auth-links">
+            <Link className="text-link" href={customerSignInUrl}>Customer sign in</Link>
+            <Link className="text-link" href={scoutSignInUrl}>Scout sign in</Link>
+          </nav>}
           <Link className="button button-small" href="/request">Send a Scout</Link>
         </div>
+        {userId
+          ? <Link className="mobile-account-link" href="/dashboard">Open my dashboard</Link>
+          : <nav aria-label="Account sign in" className="mobile-auth-links">
+            <Link href={customerSignInUrl}>Customer sign in</Link>
+            <Link href={scoutSignInUrl}>Scout sign in</Link>
+          </nav>}
       </header>
 
       <section className="hero shell">
@@ -68,7 +77,6 @@ export default async function Home() {
             <Link className="button" href="/request">Start a mission <IconArrowRight size={20} /></Link>
             <Link className="button button-ghost" href="/scout">Earn as a Scout</Link>
           </div>
-          {!userId && <div className="returning-login">Already registered? <Link href="/sign-in?redirect_url=/dashboard/customer">Customer login</Link><span>·</span><Link href="/sign-in?redirect_url=/dashboard/scout">Scout login</Link></div>}
           <div className="trust-row">
             <span><IconShieldCheck size={18} /> Vetted local Scouts</span>
             <span><IconMapPin size={18} /> Starting in Eastern NC</span>
@@ -147,7 +155,7 @@ export default async function Home() {
       <footer className="footer shell">
         <Brand />
         <p>© 2026 Send a Scout. Your trusted local presence, on demand.</p>
-        <div><a href="mailto:hello@sendascout.com">Contact</a><Link href="/policies">Policies</Link><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></div>
+        <div><a href="mailto:support@sendascout.com">support@sendascout.com</a><Link href="/policies">Policies</Link><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link></div>
       </footer>
     </main>
   );

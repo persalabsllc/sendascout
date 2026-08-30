@@ -2,6 +2,7 @@
 
 import { FormEvent, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { IconArrowRight, IconCheck, IconLock, IconMapPin, IconUser } from "@tabler/icons-react";
 import { saveCustomerProfile, type CustomerProfileInput } from "@/app/actions/profile";
 import { Brand } from "./brand";
@@ -53,6 +54,7 @@ export function CustomerProfileForm({ initialValue, nextPath }: { initialValue: 
             <Field label="ZIP code" inputMode="numeric" autoComplete="postal-code" value={value.zip} onChange={(event) => set("zip", event.target.value)} />
           </div>
           <label className="check notification-check"><input type="checkbox" checked={value.emailNotificationsEnabled} onChange={(event) => set("emailNotificationsEnabled", event.target.checked)} /><span><strong>Email mission updates</strong><small>Receive Scout acceptance, progress and results alerts at your account email.</small></span></label>
+          <label className="check notification-check"><input type="checkbox" checked={value.smsNotificationsEnabled} onChange={(event) => set("smsNotificationsEnabled", event.target.checked)} /><span><strong>Text mission alerts (optional)</strong><small>By checking this box, I agree to receive transactional mission and account texts from Send a Scout. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of purchase. See <Link href="/terms" target="_blank">Terms</Link> and <Link href="/privacy" target="_blank">Privacy</Link>.</small></span></label>
           {error && <p className="form-error" role="alert">{error}</p>}
           <div className="profile-submit"><button className="button" type="submit" disabled={isPending}>{isPending ? "Saving…" : "Save and continue"}<IconArrowRight size={19} /></button></div>
         </form>
