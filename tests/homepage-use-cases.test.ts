@@ -16,7 +16,7 @@ test("homepage explains recognizable customer pain points across every mission t
   assert.match(home, /rental home/i);
   assert.match(home, /business sign/i);
   assert.match(home, /contractor/i);
-  assert.match(home, /internet-installation/i);
+  assert.match(home, /internet installer/i);
   assert.match(home, /purchase and prepay/i);
   assert.match(home, /SUV, van or pickup/i);
 });

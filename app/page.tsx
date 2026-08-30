@@ -60,7 +60,7 @@ const useCases = [
     icon: IconUsers,
     type: "Meet It",
     title: "Be there without being there.",
-    text: "Have a Scout meet a contractor or cover an internet-installation or service window, confirm what happened and report back.",
+    text: "Have a Scout meet a contractor or cover an internet installer’s service window, confirm what happened and report back.",
     examples: ["Contractors", "Internet installers", "Service windows"],
     href: "/request?type=meet-it",
     cta: "Cover an appointment",
