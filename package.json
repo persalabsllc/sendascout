@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/prepare-stripe-preview-db.mjs",
     "build": "next build",
     "db:migrate": "node scripts/migrate.mjs",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
