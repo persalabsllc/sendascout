@@ -2,6 +2,8 @@ import "server-only";
 
 import Stripe from "stripe";
 
+export { getAppUrl } from "@/lib/app-url";
+
 let stripeClient: Stripe | null = null;
 
 export function getStripe() {
@@ -29,12 +31,6 @@ export function getStripeLivemode() {
   if (secretKey.startsWith("sk_live_")) return true;
   if (secretKey.startsWith("sk_test_")) return false;
   throw new Error("STRIPE_SECRET_KEY must be a Stripe test or live secret key.");
-}
-
-export function getAppUrl() {
-  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!configured) return "https://sendascout.com";
-  return configured.replace(/\/$/, "");
 }
 
 export function stripeObjectId(value: string | { id: string } | null | undefined) {
