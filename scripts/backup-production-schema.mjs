@@ -47,8 +47,8 @@ await database.transaction((transaction) => [
   transaction`SET LOCAL lock_timeout = '15s'`,
   transaction`SET LOCAL statement_timeout = '5min'`,
   transaction`SELECT pg_advisory_xact_lock(hashtext('sendascout:pre-stripe-production-backup'))`,
-  transaction.unsafe(`CREATE SCHEMA "${BACKUP_SCHEMA}"`),
-  transaction.unsafe(`
+  transaction`${transaction.unsafe(`CREATE SCHEMA "${BACKUP_SCHEMA}"`)}`,
+  transaction`${transaction.unsafe(`
     DO $backup$
     DECLARE
       source_table record;
@@ -68,11 +68,11 @@ await database.transaction((transaction) => [
       END LOOP;
     END
     $backup$
-  `),
-  transaction.unsafe(`
+  `)}`,
+  transaction`${transaction.unsafe(`
     CREATE TABLE "${BACKUP_SCHEMA}"."__drizzle_migrations"
     AS TABLE drizzle.__drizzle_migrations
-  `),
+  `)}`,
 ]);
 
 console.log(`Created Production backup schema ${BACKUP_SCHEMA}.`);

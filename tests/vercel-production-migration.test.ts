@@ -81,5 +81,6 @@ test("Production backup script is guarded and does not log connection values", a
   const backupScript = await readFile(new URL("../scripts/backup-production-schema.mjs", import.meta.url), "utf8");
   assert.match(backupScript, /VERCEL_ENV !== "production"/);
   assert.match(backupScript, /pre_stripe_production_20260831/);
+  assert.doesNotMatch(backupScript, /^\s*transaction\.unsafe\(/m);
   assert.doesNotMatch(backupScript, /console\.log\([^\n]*connectionString/);
 });
