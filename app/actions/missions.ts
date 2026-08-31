@@ -643,7 +643,7 @@ export async function submitMissionResults(
     let additionalRefreshId: string | null = null;
     let transitionQuery: BatchItem<"pg">;
     if (bundleContext && nextLeg) {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id` }).as(sql`
+      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
         WITH finished AS (
           UPDATE missions AS current_part
           SET status = 'completed',
@@ -720,7 +720,7 @@ export async function submitMissionResults(
       resultNotification = { recipientUserId: mission.customerId, missionId: nextLeg.id, kind: "bundle_part_ready", title: "The next mission part is ready", body: `Your Scout completed part ${mission.bundleSequence} of ${bundleContext.legs.length} and can now begin the next part.`, actionLabel: "Track next part", actionUrl: `https://sendascout.com/dashboard/missions/${nextLeg.id}` };
       additionalRefreshId = nextLeg.id;
     } else if (bundleContext) {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id` }).as(sql`
+      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
         WITH submitted_part AS (
           UPDATE missions AS current_part
           SET status = 'submitted',
@@ -775,7 +775,7 @@ export async function submitMissionResults(
       transitionQuery = db.with(transition).select({ id: transition.id }).from(transition);
       resultNotification = { recipientUserId: mission.customerId, missionId: id, kind: "results_submitted", title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready", body: "All mission parts are complete. Review the results and confirm completion within 24 hours.", actionLabel: "Review results", actionUrl: `https://sendascout.com/dashboard/missions/${id}` };
     } else {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id` }).as(sql`
+      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
         WITH submitted_mission AS (
           UPDATE missions AS current_mission
           SET status = 'submitted',
