@@ -4,6 +4,7 @@ import test from "node:test";
 
 const paymentService = readFileSync(new URL("../lib/stripe-payments.ts", import.meta.url), "utf8");
 const lateRefundService = readFileSync(new URL("../lib/stripe-late-payment-refunds.ts", import.meta.url), "utf8");
+const settlementService = readFileSync(new URL("../lib/stripe-settlement.ts", import.meta.url), "utf8");
 const operationsCron = readFileSync(new URL("../app/api/cron/auto-complete/route.ts", import.meta.url), "utf8");
 
 test("only a first success that is already ineligible receives the late-refund marker", () => {
@@ -31,6 +32,14 @@ test("late-payment recovery refunds only the exact charge and never infers a Sco
   assert.match(lateRefundService, /amountCents: state\.residualCents/);
   assert.match(lateRefundService, /idempotencyKey: `late-payment:\$\{state\.paymentId\}:refund:v2:from-\$\{state\.targetCents - state\.residualCents\}:attempt-\$\{state\.lateRequestCount \+ 1\}`/);
   assert.doesNotMatch(lateRefundService, /reverseScoutTransfer/);
+});
+
+test("late-refund-required payments can never fund a Scout transfer", () => {
+  assert.match(settlementService, /import \{ LATE_PAYMENT_REFUND_CODE \} from "@\/lib\/stripe-late-payment-refunds"/);
+  const sqlGuards = settlementService.match(/funding_payment\.failure_code IS DISTINCT FROM \$\{LATE_PAYMENT_REFUND_CODE\}/g) ?? [];
+  assert.ok(sqlGuards.length >= 2);
+  assert.match(settlementService, /payment\.failureCode === LATE_PAYMENT_REFUND_CODE/);
+  assert.match(settlementService, /scope\.payment\.failureCode === LATE_PAYMENT_REFUND_CODE/);
 });
 
 test("late-payment retries reserve only uncovered charge capacity", () => {

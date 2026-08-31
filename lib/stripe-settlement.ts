@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { notifyUser } from "@/lib/notifications";
 import { scoutConnectReady } from "@/lib/stripe-connect";
+import { LATE_PAYMENT_REFUND_CODE } from "@/lib/stripe-late-payment-refunds";
 import {
   nextScoutTransferReleaseAt,
   scoutTransferReleaseIsOpen,
@@ -88,6 +89,7 @@ export async function reconcileCompletedMissionSettlements(options: { limit?: nu
         WHERE funding_payment.status = 'paid'
           AND funding_payment.scout_payout_cents > 0
           AND funding_payment.livemode = ${livemode}
+          AND funding_payment.failure_code IS DISTINCT FROM ${LATE_PAYMENT_REFUND_CODE}
           AND funding_payment.legacy_stripe_transfer_id IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM payment_transfers AS existing_transfer
@@ -168,7 +170,11 @@ export async function enqueueMissionSettlement(missionId: string): Promise<Settl
     return { state: "payment_mismatch", queued: 0, processed: 0 };
   }
 
-  if (paymentRows.some((payment) => payment.livemode !== getStripeLivemode() || payment.refundedAmountCents > 0)) {
+  if (paymentRows.some((payment) => (
+    payment.livemode !== getStripeLivemode()
+    || payment.refundedAmountCents > 0
+    || payment.failureCode === LATE_PAYMENT_REFUND_CODE
+  ))) {
     return { state: "payment_mismatch", queued: 0, processed: 0 };
   }
 
@@ -628,6 +634,7 @@ export async function processPaymentTransfer(transferId: string) {
         AND funding_payment.stripe_transfer_group = ${paymentTransfers.stripeTransferGroup}
         AND funding_payment.currency = ${paymentTransfers.currency}
         AND funding_payment.livemode = ${livemode}
+        AND funding_payment.failure_code IS DISTINCT FROM ${LATE_PAYMENT_REFUND_CODE}
         AND settlement_mission.scout_id = ${paymentTransfers.scoutId}
         AND destination_profile.stripe_account_id = ${paymentTransfers.stripeAccountId}
         AND destination_profile.stripe_account_livemode = ${livemode}
@@ -934,6 +941,7 @@ async function claimedTransferStillEligible(transfer: typeof paymentTransfers.$i
   if (!scope) return false;
   if (
     scope.payment.legacyStripeTransferId
+    || scope.payment.failureCode === LATE_PAYMENT_REFUND_CODE
     || scope.payment.stripeChargeId !== transfer.sourceChargeId
     || scope.payment.stripeTransferGroup !== transfer.stripeTransferGroup
     || scope.payment.currency !== transfer.currency
