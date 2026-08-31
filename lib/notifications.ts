@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { missionBundles, missions, notifications, scoutProfiles, users } from "@/db/schema";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { isSentConfigured, sendSentSms } from "@/lib/sent";
+import { getStripeLivemode } from "@/lib/stripe";
 
 type MissionKind = "see" | "move" | "meet";
 type NotificationInput = {
@@ -238,7 +239,7 @@ export async function alertEligibleScouts(missionId: string) {
   const db = getDb();
   const [mission] = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
   // Secondary bundle legs remain private until the preceding leg is complete.
-  if (!mission || mission.archivedAt || mission.status !== "open" || (mission.bundleId && mission.bundleSequence !== 1)) return;
+  if (!mission || mission.archivedAt || mission.status !== "open" || mission.paymentStatus !== "paid" || (mission.bundleId && mission.bundleSequence !== 1)) return;
 
   const legs = mission.bundleId
     ? await db.select().from(missions)
@@ -248,6 +249,8 @@ export async function alertEligibleScouts(missionId: string) {
   const [bundle] = mission.bundleId
     ? await db.select().from(missionBundles).where(eq(missionBundles.id, mission.bundleId)).limit(1)
     : [null];
+  if (bundle && bundle.paymentStatus !== "paid") return;
+  const stripeLivemode = getStripeLivemode();
   const scoutRows = await db.select({
     userId: users.id,
     homeZip: scoutProfiles.homeZip,
@@ -257,7 +260,16 @@ export async function alertEligibleScouts(missionId: string) {
     canMove: scoutProfiles.canMove,
     canMeet: scoutProfiles.canMeet,
   }).from(scoutProfiles).innerJoin(users, eq(users.id, scoutProfiles.userId))
-    .where(and(eq(scoutProfiles.status, "approved"), eq(users.status, "active")));
+    .where(and(
+      eq(scoutProfiles.status, "approved"),
+      eq(scoutProfiles.stripeAccountLivemode, stripeLivemode),
+      eq(scoutProfiles.stripeConnectStatus, "ready"),
+      eq(scoutProfiles.stripeTransfersActive, true),
+      eq(scoutProfiles.payoutsEnabled, true),
+      sql`${scoutProfiles.stripePayoutScheduleConfiguredAt} IS NOT NULL`,
+      sql`${scoutProfiles.stripeAccountId} IS NOT NULL`,
+      eq(users.status, "active"),
+    ));
   const eligibleScouts = scoutRows.filter((scout) => legs.every((leg) => isMissionEligibleForScout(leg, scout)));
 
   const now = Date.now();
@@ -272,6 +284,7 @@ export async function alertEligibleScouts(missionId: string) {
 
 export async function alertScoutToOpenMissions(scoutUserId: string) {
   const db = getDb();
+  const stripeLivemode = getStripeLivemode();
   const [scout] = await db.select({
     userId: users.id,
     homeZip: scoutProfiles.homeZip,
@@ -284,11 +297,17 @@ export async function alertScoutToOpenMissions(scoutUserId: string) {
     eq(users.id, scoutUserId),
     eq(users.status, "active"),
     eq(scoutProfiles.status, "approved"),
+    eq(scoutProfiles.stripeAccountLivemode, stripeLivemode),
+    eq(scoutProfiles.stripeConnectStatus, "ready"),
+    eq(scoutProfiles.stripeTransfersActive, true),
+    eq(scoutProfiles.payoutsEnabled, true),
+    sql`${scoutProfiles.stripePayoutScheduleConfiguredAt} IS NOT NULL`,
+    sql`${scoutProfiles.stripeAccountId} IS NOT NULL`,
   )).limit(1);
   if (!scout) return 0;
 
   const [openRows, existingAlerts] = await Promise.all([
-    db.select().from(missions).where(and(eq(missions.status, "open"), sql`${missions.archivedAt} IS NULL`)).orderBy(asc(missions.createdAt)),
+    db.select().from(missions).where(and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), sql`${missions.archivedAt} IS NULL`)).orderBy(asc(missions.createdAt)),
     db.select({ missionId: notifications.missionId }).from(notifications).where(and(
       eq(notifications.recipientUserId, scoutUserId),
       eq(notifications.channel, "in_app"),
@@ -314,6 +333,7 @@ export async function alertScoutToOpenMissions(scoutUserId: string) {
     if (alreadyAlerted.has(mission.id)) return false;
     const preferredWindowActive = preferredWindowIsActive(mission);
     if (preferredWindowActive && mission.preferredScoutId !== scoutUserId) return false;
+    if (mission.bundleId && bundleById.get(mission.bundleId)?.paymentStatus !== "paid") return false;
     const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
     return legs.every((leg) => isMissionEligibleForScout(leg, scout));
   });

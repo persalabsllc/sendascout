@@ -1,10 +1,12 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { missions, scoutProfiles } from "@/db/schema";
+import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { computeDrivingRoute } from "@/lib/google-maps";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { scoutConnectReady } from "@/lib/stripe-connect";
+import { getStripeLivemode } from "@/lib/stripe";
 
 export async function GET(request: Request) {
   const user = await requireAppUser("customer");
@@ -14,9 +16,12 @@ export async function GET(request: Request) {
   const db = getDb();
   const [mission] = await db.select().from(missions).where(eq(missions.id, missionId)).limit(1);
   if (!mission) return NextResponse.json({ error: "Mission not found." }, { status: 404 });
+  const [bundle] = mission.bundleId
+    ? await db.select({ paymentStatus: missionBundles.paymentStatus }).from(missionBundles).where(eq(missionBundles.id, mission.bundleId)).limit(1)
+    : [null];
 
   let allowed = mission.customerId === user.id || mission.scoutId === user.id || user.role === "admin";
-  if (!allowed && user.role === "scout" && mission.status === "open" && !mission.scoutId) {
+  if (!allowed && user.role === "scout" && mission.status === "open" && mission.paymentStatus === "paid" && (!bundle || bundle.paymentStatus === "paid") && !mission.scoutId) {
     const [[profile], itinerary] = await Promise.all([
       db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
       mission.bundleId
@@ -30,7 +35,7 @@ export async function GET(request: Request) {
       && leg.preferredScoutExclusiveUntil
       && leg.preferredScoutExclusiveUntil.getTime() > Date.now(),
     ));
-    allowed = Boolean(!privateFirstLook && profile && profile.status === "approved" && itinerary.every((leg) => isMissionEligibleForScout(leg, profile)));
+    allowed = Boolean(!privateFirstLook && profile && profile.status === "approved" && scoutConnectReady(profile, getStripeLivemode()) && itinerary.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, profile)));
   }
   if (!allowed) return NextResponse.json({ error: "You cannot view this mission map." }, { status: 403 });
 

@@ -18,6 +18,8 @@ import {
 } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { scoutConnectReady } from "@/lib/stripe-connect";
+import { getStripeLivemode } from "@/lib/stripe";
 
 export const metadata = { title: "Mission | Send a Scout", robots: { index: false, follow: false } };
 
@@ -41,7 +43,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   if (mission.customerId === user.id) role = "customer";
   else if (mission.scoutId === user.id) role = "scout";
   else if (user.role === "admin") role = "admin";
-  else if (user.role === "scout" && mission.status === "open" && !mission.scoutId) {
+  else if (user.role === "scout" && mission.status === "open" && mission.paymentStatus === "paid" && (!bundle || bundle.paymentStatus === "paid") && !mission.scoutId) {
     const [[profile], claimWindows] = await Promise.all([
       db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
       db.select({ available: sql<boolean>`(
@@ -52,7 +54,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
         OR ${missions.preferredScoutExclusiveUntil} <= now()
       )` }).from(missions).where(inArray(missions.id, itinerary.map((leg) => leg.id))),
     ]);
-    if (!profile || profile.status !== "approved" || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
+    if (!profile || profile.status !== "approved" || !scoutConnectReady(profile, getStripeLivemode()) || itinerary.some((leg) => leg.paymentStatus !== "paid") || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
     role = "scout";
     canClaim = true;
   } else notFound();
@@ -217,6 +219,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       customerDeltaCents: order.customerDeltaCents,
       scoutDeltaCents: order.scoutDeltaCents,
       proposedByMe: order.proposedByUserId === user.id,
+      awaitingPayment: order.status === "pending" && Boolean(order.approvedByUserId),
       expiresAt: order.expiresAt?.toISOString() ?? null,
     }))}
     scoutPreferred={Boolean(preferredScoutRows[0])}

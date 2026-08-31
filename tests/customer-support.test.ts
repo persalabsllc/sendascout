@@ -24,7 +24,7 @@ test("support resolution amounts respect refundable and credit limits", () => {
 
 test("customer approval is the only action that closes a proposed ticket and issues credit", () => {
   assert.match(supportActions, /status = 'closed', customer_decision = 'approved'/);
-  assert.match(supportActions, /WHERE id = \$\{ticketId\} AND customer_id = \$\{customer\.id\} AND status = 'awaiting_customer'/);
+  assert.match(supportActions, /WHERE id = \$\{ticketId\}[\s\S]*AND customer_id = \$\{customer\.id\}[\s\S]*AND status = 'awaiting_customer'/);
   assert.match(supportActions, /INSERT INTO customer_credits/);
   assert.match(supportActions, /WHERE resolution_type = 'account_credit'/);
 });

@@ -11,6 +11,7 @@ import {
 } from "../lib/mission-operations.ts";
 import { meetActionIsAvailable, meetActionOpensAt } from "../lib/mission-timing.ts";
 import { scoutApprovalChecklist, scoutReadyForApproval, type ScoutApprovalInput } from "../lib/scout-approval.ts";
+import { scoutConnectReady } from "../lib/stripe-connect.ts";
 
 test("unstarted missions cancel immediately", () => {
   for (const status of ["draft", "open", "claimed"] as const) assert.equal(cancellationMode(status), "immediate");
@@ -96,17 +97,52 @@ const readyScout: ScoutApprovalInput = {
   canMove: true,
   canMeet: true,
   verificationConsentedAt: new Date(),
+  stripeAccountId: "acct_test_scout",
+  stripeAccountLivemode: false,
+  stripeConnectStatus: "ready",
+  stripeTransfersActive: true,
+  payoutsEnabled: true,
+  stripePayoutScheduleConfiguredAt: new Date(),
 };
 
 test("Scout approval requires every trust and profile check", () => {
-  assert.equal(scoutReadyForApproval(readyScout, "current"), true);
+  assert.equal(scoutReadyForApproval(readyScout, "current", false), true);
   const incomplete = { ...readyScout, headshotPath: null, identityCheck: "pending", legalVersion: "old" };
-  assert.equal(scoutReadyForApproval(incomplete, "current"), false);
-  assert.deepEqual(scoutApprovalChecklist(incomplete, "current").filter((item) => !item.complete).map((item) => item.key), ["identity", "terms", "headshot"]);
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["identity", "terms", "headshot"]);
+});
+
+test("Scout approval requires a transfer-ready Stripe account", () => {
+  const incomplete = { ...readyScout, stripeTransfersActive: false, payoutsEnabled: false };
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["payouts"]);
+});
+
+test("Scout approval waits for the Friday payout schedule", () => {
+  const incomplete = { ...readyScout, stripePayoutScheduleConfiguredAt: null };
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["payouts"]);
+});
+
+test("Scout approval waits while Stripe reports a restricted account", () => {
+  const incomplete = { ...readyScout, stripeConnectStatus: "restricted" };
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["payouts"]);
+});
+
+test("Scout approval rejects a payout account from the other Stripe mode", () => {
+  assert.equal(scoutReadyForApproval(readyScout, "current", true), false);
+  assert.deepEqual(scoutApprovalChecklist(readyScout, "current", true).filter((item) => !item.complete).map((item) => item.key), ["payouts"]);
+});
+
+test("Stripe Connect readiness requires the current Stripe mode", () => {
+  assert.equal(scoutConnectReady(readyScout, false), true);
+  assert.equal(scoutConnectReady(readyScout, true), false);
+  assert.equal(scoutConnectReady({ ...readyScout, stripeAccountLivemode: null }, false), false);
 });
 
 test("a fake or incomplete profile cannot pass approval", () => {
   const incomplete = { ...readyScout, firstName: "", lastName: null, phone: "555", homeZip: "ABCDE", vehicleType: "", canSee: false, canMove: false, canMeet: false, verificationConsentedAt: null };
-  assert.equal(scoutReadyForApproval(incomplete, "current"), false);
-  assert.ok(scoutApprovalChecklist(incomplete, "current").filter((item) => !item.complete).length >= 6);
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.ok(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).length >= 6);
 });

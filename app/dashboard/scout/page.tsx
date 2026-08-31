@@ -5,6 +5,8 @@ import { getDb } from "@/db";
 import { missionBundles, missions, notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { scoutConnectReady } from "@/lib/stripe-connect";
+import { getStripeLivemode } from "@/lib/stripe";
 
 export const metadata = { title: "Scout Dashboard | Send a Scout", robots: { index: false, follow: false } };
 
@@ -17,11 +19,12 @@ export default async function ScoutDashboard() {
   }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
   if (!profileRow) redirect("/scout");
   const profile = profileRow.profile;
+  const stripeLivemode = getStripeLivemode();
   const [rows, alertRows] = await Promise.all([
-    profile.status === "approved"
+    profile.status === "approved" && scoutConnectReady(profile, stripeLivemode)
       ? db.select().from(missions).where(and(isNull(missions.archivedAt), or(
         eq(missions.scoutId, user.id),
-        and(eq(missions.status, "open"), or(
+        and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
           isNull(missions.preferredScoutId),
           eq(missions.preferredScoutId, user.id),
           isNotNull(missions.preferredScoutBroadcastAt),
@@ -49,7 +52,7 @@ export default async function ScoutDashboard() {
   const visibleRows = rows.filter((mission) => {
     if (mission.bundleId) {
       const bundle = bundleById.get(mission.bundleId);
-      if (!bundle || mission.bundleSequence !== bundle.activeSequence) return false;
+      if (!bundle || bundle.paymentStatus !== "paid" || mission.bundleSequence !== bundle.activeSequence) return false;
     }
     return true;
   });

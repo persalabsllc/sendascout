@@ -3,6 +3,8 @@ export type LegacyMissionType = "see" | "move" | "meet";
 export const MOVE_INCLUDED_ROUTE_MILES = 3;
 export const MOVE_CUSTOMER_PER_EXTRA_MILE_CENTS = 175;
 export const MOVE_SCOUT_PER_EXTRA_MILE_CENTS = 125;
+export const ENHANCED_REPORT_CUSTOMER_CENTS = 900;
+export const ENHANCED_REPORT_SCOUT_CENTS = 600;
 
 export type LegacyMissionAmounts = {
   customerPriceCents: number;

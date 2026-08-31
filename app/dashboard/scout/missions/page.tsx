@@ -6,6 +6,8 @@ import { getDb } from "@/db";
 import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { scoutMissionEligibility, type ScoutMissionEligibilityReason } from "@/lib/scout-matching";
+import { scoutConnectReady } from "@/lib/stripe-connect";
+import { getStripeLivemode } from "@/lib/stripe";
 
 export const metadata = { title: "Mission Board | Send a Scout", robots: { index: false, follow: false } };
 
@@ -13,9 +15,10 @@ export default async function ScoutMissionsPage() {
   const user = await requireAppUser("scout");
   const db = getDb();
   const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
+  const stripeLivemode = getStripeLivemode();
   const rows = await db.select().from(missions).where(and(isNull(missions.archivedAt), or(
     eq(missions.scoutId, user.id),
-    and(eq(missions.status, "open"), or(
+    and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
       isNull(missions.preferredScoutId),
       eq(missions.preferredScoutId, user.id),
       isNotNull(missions.preferredScoutBroadcastAt),
@@ -37,11 +40,11 @@ export default async function ScoutMissionsPage() {
     list.push(leg);
     legsByBundle.set(leg.bundleId, list);
   }
-  const visibleRows = rows.filter((mission) => !mission.bundleId || mission.bundleSequence === bundleById.get(mission.bundleId)?.activeSequence);
+  const visibleRows = rows.filter((mission) => !mission.bundleId || (bundleById.get(mission.bundleId)?.paymentStatus === "paid" && mission.bundleSequence === bundleById.get(mission.bundleId)?.activeSequence));
   const hiddenReasons = new Set<ScoutMissionEligibilityReason>();
   const eligible = visibleRows.filter((mission) => {
     if (mission.scoutId === user.id) return true;
-    if (profile?.status !== "approved") return false;
+    if (profile?.status !== "approved" || !scoutConnectReady(profile, stripeLivemode)) return false;
     const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
     const reasons = legs.map((leg) => scoutMissionEligibility(leg, profile)).filter((reason): reason is ScoutMissionEligibilityReason => reason !== null);
     reasons.forEach((reason) => hiddenReasons.add(reason));
@@ -53,9 +56,11 @@ export default async function ScoutMissionsPage() {
   const active = eligible.filter((mission) => mission.scoutId === user.id && !["completed", "cancelled", "disputed"].includes(mission.status));
   const open = eligible.filter((mission) => mission.status === "open" && !mission.scoutId);
   const openCandidates = visibleRows.filter((mission) => mission.status === "open" && !mission.scoutId);
-  const unmatchedOpenCount = profile?.status === "approved" ? Math.max(0, openCandidates.length - open.length) : 0;
+  const unmatchedOpenCount = profile?.status === "approved" && scoutConnectReady(profile, stripeLivemode) ? Math.max(0, openCandidates.length - open.length) : 0;
   const openEmpty = profile?.status !== "approved"
     ? "Your application must be approved before open missions appear."
+    : !scoutConnectReady(profile, stripeLivemode)
+      ? "Finish Stripe payout setup before open missions appear."
     : unmatchedOpenCount
       ? unmatchedMissionCopy(unmatchedOpenCount, hiddenReasons)
       : "There are no matching open missions right now.";

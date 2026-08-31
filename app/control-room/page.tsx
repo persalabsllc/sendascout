@@ -7,7 +7,7 @@ import { requireAdminUser } from "@/lib/app-user";
 export const metadata = { title: "Control Room | Send a Scout", robots: { index: false, follow: false } };
 
 export default async function ControlRoomPage() {
-  await requireAdminUser();
+  const admin = await requireAdminUser();
   const db = getDb();
   const [missionRows, caseRows, messageRows, eventRows, [newCustomerCount], [newScoutCount]] = await Promise.all([
     db.select({ mission: missions, customer: users, bundle: missionBundles }).from(missions)
@@ -68,6 +68,7 @@ export default async function ControlRoomPage() {
       title: bundle?.title ?? mission.title,
       type: mission.type,
       status: bundle?.status ?? mission.status,
+      paymentStatus: bundle?.paymentStatus ?? mission.paymentStatus,
       customer: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || customer.email,
       location: `${mission.city}, ${mission.state} ${mission.zip}`,
       price: bundle?.customerPriceCents ?? mission.customerPriceCents,
@@ -90,6 +91,11 @@ export default async function ControlRoomPage() {
       resolution: item.resolution,
       refundAmountCents: item.refundAmountCents,
       payoutAmountCents: item.payoutAmountCents,
+      financialApprovalPending: item.status === "open"
+        && item.refundAmountCents > 10_000
+        && Boolean(item.resolvedBy)
+        && !item.resolvedAt,
+      proposedByCurrentAdmin: item.resolvedBy === admin.id,
       createdAt: item.createdAt.toISOString(),
       resolvedAt: item.resolvedAt?.toISOString() ?? null,
       customerPriceCents: Math.max(0, (bundle?.customerPriceCents ?? mission.customerPriceCents) - Number(recordedRefundAmountCents ?? 0)),

@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { getDb } from "@/db";
 import {
   customerPreferredScouts,
@@ -12,6 +13,7 @@ import {
   missions,
   missionTemplates,
   missionUpdates,
+  payments,
   scoutProfiles,
   users,
 } from "@/db/schema";
@@ -19,10 +21,11 @@ import { requireAppUser } from "@/lib/app-user";
 import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pricing";
 import { hashDeliveryPin, normalizeDeliveryPin } from "@/lib/delivery-pin";
 import { calculateBundlePricing, calculateDiscountedMissionPrice, nextRecurrenceDate } from "@/lib/mission-features";
-import { alertEligibleScouts } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { localDateTimeToUtc } from "@/lib/time";
 import { isMissionTimeZone, normalizeMissionTimeZone } from "@/lib/us-time-zones";
+import { createHostedCheckoutForPayment, ensureStripeCustomer } from "@/lib/stripe-payments";
+import { getStripeLivemode } from "@/lib/stripe";
 
 export type MissionChecklistDraft = {
   prompt: string;
@@ -114,7 +117,7 @@ export type ScoutInput = {
   smsNotificationsEnabled: boolean;
 };
 
-export type OnboardingResult = { ok: true; id: string; scoutUserId?: string } | { ok: false; error: string };
+export type OnboardingResult = { ok: true; id: string; scoutUserId?: string; checkoutUrl?: string } | { ok: false; error: string };
 
 function required(value: string, label: string) {
   if (!value.trim()) throw new Error(`${label} is required.`);
@@ -169,6 +172,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
   try {
     validateMissionInput(input);
     const user = await requireAppUser("customer");
+    if (user.role !== "customer") throw new Error("Only customer accounts can publish missions.");
     const db = getDb();
     const [sourceMissionId, selectedTemplateId, preferredScoutId, reviewedRecurrence] = await Promise.all([
       validateOwnedSourceMission(db, user.id, input.sourceMissionId),
@@ -183,6 +187,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
 
     const now = new Date();
     const missionId = randomUUID();
+    const paymentId = randomUUID();
     const bundleId = input.addMoveLeg ? randomUUID() : null;
     const childMissionId = input.addMoveLeg ? randomUUID() : null;
     const shouldCreateTemplate = !reviewedRecurrence && (input.saveAsTemplate || input.recurrence !== "once");
@@ -192,7 +197,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     const recurrenceId = reviewedRecurrence?.id ?? createdRecurrenceId;
     const missionTimeZone = normalizeMissionTimeZone(reviewedRecurrence?.timeZone ?? input.timeZone);
     const scheduledFor = reviewedRecurrence?.occurrenceAt ?? (input.scheduledFor ? localDateTimeToUtc(input.scheduledFor, missionTimeZone) : null);
-    const preferredScoutExclusiveUntil = preferredScoutId ? new Date(now.getTime() + 60 * 60 * 1000) : null;
+    const preferredScoutExclusiveUntil = null;
     const pinPepper = ((input.type === "move" && input.deliveryPinRequired) || (input.addMoveLeg && input.bundleDeliveryPinRequired)) ? requireDeliveryPinSecret() : "";
     const deliveryPinHash = input.type === "move" && input.deliveryPinRequired
       ? hashDeliveryPin(input.deliveryPin, pinPepper, missionId)
@@ -215,7 +220,8 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       bundleId,
       bundleSequence: bundleId ? 1 : null,
       type: input.type,
-      status: "open",
+      status: "draft",
+      paymentStatus: "pending",
       title: input.title.trim(),
       instructions: input.instructions.trim(),
       addressLine1: (input.type === "move" ? input.pickupAddress : input.address).trim(),
@@ -268,6 +274,7 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       preferredScoutId,
       type: "move",
       status: "draft",
+      paymentStatus: "pending",
       title: input.bundleTitle.trim(),
       instructions: input.bundleInstructions.trim(),
       addressLine1: input.address.trim(),
@@ -345,13 +352,14 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
           id: bundleId,
           customerId: user.id,
           title: `${input.title.trim()} + delivery`,
-          status: "open",
+          status: "draft",
           activeSequence: 1,
           listCustomerPriceCents: amount.listCustomerPriceCents,
           bundleDiscountCents: amount.bundleDiscountCents,
           customerPriceCents: amount.totalCustomerPriceCents,
           scoutPayoutCents: amount.totalScoutPayoutCents,
           platformFeeCents: amount.totalPlatformFeeCents,
+          paymentStatus: "pending",
         })
       : noOp();
     const childQuery = childMission ? db.insert(missions).values(childMission) : noOp();
@@ -368,6 +376,8 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       ? db.update(missionTemplates).set({ lastUsedAt: now, updatedAt: now }).where(and(eq(missionTemplates.id, selectedTemplateId), eq(missionTemplates.customerId, user.id)))
       : noOp();
 
+    const stripeCustomerId = await ensureStripeCustomer(user);
+    const transferGroup = bundleId ? `bundle_${bundleId}` : `mission_${missionId}`;
     await db.batch([
       db.update(users).set({ phone: input.phone.trim(), updatedAt: now }).where(eq(users.id, user.id)),
       templateQuery,
@@ -377,23 +387,35 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       childQuery,
       checklistQuery,
       touchTemplateQuery,
+      db.insert(payments).values({
+        id: paymentId,
+        missionId,
+        bundleId,
+        customerId: user.id,
+        kind: "booking",
+        currency: "usd",
+        stripeCustomerId,
+        livemode: getStripeLivemode(),
+        stripeTransferGroup: transferGroup,
+        idempotencyKey: `booking:${missionId}:v1`,
+        amountCents: amount.totalCustomerPriceCents,
+        scoutPayoutCents: amount.totalScoutPayoutCents,
+        platformFeeCents: amount.totalPlatformFeeCents,
+        status: "pending",
+      }),
       db.insert(missionUpdates).values([
-        { missionId, authorId: user.id, status: "open", message: preferredScoutId ? "Mission offered to the preferred Scout first." : "Mission published automatically to eligible Scouts." },
+        { missionId, authorId: user.id, status: "draft", message: "Mission saved. Complete secure payment to publish it to eligible Scouts." },
         ...(childMissionId ? [{ missionId: childMissionId, authorId: user.id, status: "draft" as const, message: "Follow-up Move It leg queued behind the Meet It mission." }] : []),
       ]),
     ]);
 
-    try {
-      await alertEligibleScouts(missionId);
-    } catch (alertError) {
-      console.error("Mission published, but Scout alerts could not be delivered", alertError);
-    }
     revalidatePath("/dashboard/customer");
-    revalidatePath("/dashboard/scout");
     revalidatePath("/control-room");
-
-    return { ok: true, id: missionId };
+    const checkoutUrl = await createHostedCheckoutForPayment(paymentId, user.id);
+    if (!checkoutUrl) return { ok: true, id: missionId };
+    return { ok: true, id: missionId, checkoutUrl };
   } catch (error) {
+    unstable_rethrow(error);
     if (input.recurrenceScheduleId && isRecurringOccurrenceConflict(error)) {
       return { ok: false, error: "This recurring occurrence was already published. Return to Saved & recurring to review the next available date." };
     }

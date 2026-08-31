@@ -5,6 +5,25 @@ import { missionRecurrences, missions } from "@/db/schema";
 import { nextRecurrenceDate } from "@/lib/mission-features";
 import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
 import { reportException, runOperationalHealthChecks } from "@/lib/observability";
+import { reconcileScoutPayoutReadiness } from "@/lib/stripe-connect-service";
+import { reconcileLatePaymentRefunds } from "@/lib/stripe-late-payment-refunds";
+import { reconcileAmbiguousOffSessionPayments } from "@/lib/stripe-payment-addons";
+import { reconcilePaidAddonApplications } from "@/lib/stripe-payments";
+import {
+  processPendingPaymentRefunds,
+  processPendingPaymentTransferReversals,
+  reconcileApprovedSupportRefunds,
+  reconcileMissionCaseRefunds,
+} from "@/lib/stripe-refunds";
+import {
+  processPendingPaymentTransfers,
+  reconcileCasePayouts,
+  reconcileCompletedMissionSettlements,
+  reconcileSettledPaymentTransfers,
+  settleMissionBestEffort,
+} from "@/lib/stripe-settlement";
+
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const startedAt = Date.now();
@@ -80,6 +99,7 @@ export async function GET(request: Request) {
       if (Number(completionRows[0]?.mission_count ?? 0) !== 1) continue;
       if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: mission.id, kind: "mission_auto_confirmed", title: "Mission automatically confirmed", body: "The 24-hour customer review window ended, so the mission is now complete.", actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
       await notifyUser({ recipientUserId: mission.customerId, missionId: mission.id, kind: "mission_auto_confirmed", title: "Mission automatically completed", body: "The mission was automatically completed after the 24-hour review window. Contact support promptly if there is a problem.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${mission.id}` });
+      await settleMissionBestEffort(mission.id, "automatic_confirmation");
       completed += 1;
     }
 
@@ -87,6 +107,7 @@ export async function GET(request: Request) {
     const preferredReleases = await db.select({ id: missions.id }).from(missions).where(and(
       sql`${missions.archivedAt} IS NULL`,
       eq(missions.status, "open"),
+      eq(missions.paymentStatus, "paid"),
       lte(missions.preferredScoutExclusiveUntil, now),
       isNull(missions.preferredScoutBroadcastAt),
     ));
@@ -95,6 +116,7 @@ export async function GET(request: Request) {
       const [released] = await db.update(missions).set({ preferredScoutBroadcastAt: now, updatedAt: now }).where(and(
         eq(missions.id, candidate.id),
         eq(missions.status, "open"),
+        eq(missions.paymentStatus, "paid"),
         isNull(missions.preferredScoutBroadcastAt),
       )).returning({ id: missions.id });
       if (!released) continue;
@@ -151,9 +173,21 @@ export async function GET(request: Request) {
         recurringReminders += 1;
       }
     }
+    const payoutReadinessReconciliation = await reconcileScoutPayoutReadiness();
+    const settledTransferReconciliation = await reconcileSettledPaymentTransfers();
+    const ambiguousOffSessionReconciliation = await reconcileAmbiguousOffSessionPayments();
+    const paidAddonApplicationReconciliation = await reconcilePaidAddonApplications();
+    const latePaymentRefundReconciliation = await reconcileLatePaymentRefunds();
+    const caseRefundReconciliation = await reconcileMissionCaseRefunds();
+    const supportRefundReconciliation = await reconcileApprovedSupportRefunds();
+    const refunds = await processPendingPaymentRefunds();
+    const transferReversals = await processPendingPaymentTransferReversals();
+    const casePayoutReconciliation = await reconcileCasePayouts();
+    const settlementReconciliation = await reconcileCompletedMissionSettlements();
+    const transfers = await processPendingPaymentTransfers();
     const health = await runOperationalHealthChecks();
-    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, health, durationMs: Date.now() - startedAt }));
-    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, health });
+    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
+    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
   } catch (error) {
     await reportException(error, { route: "/api/cron/auto-complete", requestId, durationMs: Date.now() - startedAt });
     return NextResponse.json({ ok: false, error: "Operations check failed." }, { status: 500 });

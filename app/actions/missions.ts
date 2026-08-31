@@ -1,7 +1,7 @@
 "use server";
 
 import { get, head } from "@vercel/blob";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { revalidatePath } from "next/cache";
 import sharp from "sharp";
@@ -18,6 +18,7 @@ import {
   missions,
   missionUpdates,
   notifications,
+  payments,
   customerPreferredScouts,
   scoutProfiles,
   users,
@@ -26,10 +27,15 @@ import { requireAdminUser, requireAppUser } from "@/lib/app-user";
 import { alertEligibleScouts, alertScoutToOpenMissions, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
+import { ENHANCED_REPORT_CUSTOMER_CENTS, ENHANCED_REPORT_SCOUT_CENTS } from "@/lib/mission-pricing-core";
 import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-verification";
 import { formatDateTime } from "@/lib/time";
 import { scoutApprovalChecklist } from "@/lib/scout-approval";
 import { LEGAL_VERSION } from "@/lib/legal";
+import { scoutConnectReady } from "@/lib/stripe-connect";
+import { getStripeLivemode } from "@/lib/stripe";
+import { settleMissionBestEffort } from "@/lib/stripe-settlement";
+import { attemptSavedPayment, ensureAddonPayment } from "@/lib/stripe-payment-addons";
 import { meetActionIsAvailable, meetActionOpensAt } from "@/lib/mission-timing";
 import {
   isDeliveryPinLocked,
@@ -55,8 +61,8 @@ const maxResultFileCount = 24;
 const maxResultTotalSize = 250 * 1024 * 1024;
 const changeOrderCustomerCents = 900;
 const changeOrderScoutCents = 600;
-const enhancedReportCustomerCents = 900;
-const enhancedReportScoutCents = 600;
+const enhancedReportCustomerCents = ENHANCED_REPORT_CUSTOMER_CENTS;
+const enhancedReportScoutCents = ENHANCED_REPORT_SCOUT_CENTS;
 
 const activeStatuses: MissionStatus[] = [
   "claimed", "en_route", "onsite", "en_route_pickup", "at_pickup", "en_route_dropoff", "at_dropoff", "submitted",
@@ -156,10 +162,15 @@ export async function claimMission(id: string): Promise<Result> {
     if (!profile || profile.status !== "approved" || profile.identityCheck !== "clear" || !profile.identityVerifiedName?.trim() || !profile.identityVerifiedAt) {
       throw new Error("Your Scout account and verified identity must be approved before claiming missions.");
     }
+    const stripeLivemode = getStripeLivemode();
+    if (!scoutConnectReady(profile, stripeLivemode)) throw new Error("Finish Stripe payout setup before claiming missions.");
     const mission = await getMission(id);
     if (mission.customerId === user.id) throw new Error("You cannot claim a mission created by your own account.");
     const bundleContext = await getBundleContext(mission);
     const missionsToCheck = bundleContext?.legs ?? [mission];
+    if (mission.paymentStatus !== "paid" || bundleContext?.bundle.paymentStatus && bundleContext.bundle.paymentStatus !== "paid" || missionsToCheck.some((candidate) => candidate.paymentStatus !== "paid")) {
+      throw new Error("This mission is not available until its customer payment is confirmed.");
+    }
     if (missionsToCheck.some((candidate) => !isMissionEligibleForScout(candidate, profile))) {
       throw new Error("One or more mission stops are outside your selected service area, vehicle capacity, or mission preferences.");
     }
@@ -195,12 +206,19 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.can_see = ${profile.canSee}
             AND approved_profile.can_move = ${profile.canMove}
             AND approved_profile.can_meet = ${profile.canMeet}
+            AND approved_profile.stripe_account_id IS NOT NULL
+            AND approved_profile.stripe_account_livemode = ${stripeLivemode}
+            AND approved_profile.stripe_connect_status = 'ready'
+            AND approved_profile.stripe_transfers_active = TRUE
+            AND approved_profile.payouts_enabled = TRUE
+            AND approved_profile.stripe_payout_schedule_configured_at IS NOT NULL
           RETURNING approved_profile.identity_verified_name, approved_profile.headshot_path, approved_profile.identity_verified_at
         ), target_bundle AS (
           SELECT id, active_sequence
           FROM mission_bundles
           WHERE id = ${mission.bundleId}
             AND status = 'open'
+            AND payment_status = 'paid'
             AND active_sequence = ${mission.bundleSequence}
             AND EXISTS (SELECT 1 FROM locked_profile)
             AND NOT EXISTS (
@@ -230,6 +248,7 @@ export async function claimMission(id: string): Promise<Result> {
             AND candidate.archived_at IS NULL
             AND candidate.scout_id IS NULL
             AND candidate.status IN ('open', 'draft')
+            AND candidate.payment_status = 'paid'
             AND NOT EXISTS (
               SELECT 1
               FROM missions AS invalid
@@ -283,6 +302,12 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.can_see = ${profile.canSee}
             AND approved_profile.can_move = ${profile.canMove}
             AND approved_profile.can_meet = ${profile.canMeet}
+            AND approved_profile.stripe_account_id IS NOT NULL
+            AND approved_profile.stripe_account_livemode = ${stripeLivemode}
+            AND approved_profile.stripe_connect_status = 'ready'
+            AND approved_profile.stripe_transfers_active = TRUE
+            AND approved_profile.payouts_enabled = TRUE
+            AND approved_profile.stripe_payout_schedule_configured_at IS NOT NULL
           RETURNING approved_profile.identity_verified_name, approved_profile.headshot_path, approved_profile.identity_verified_at
         ), claimed_mission AS (
           UPDATE missions AS candidate
@@ -296,6 +321,7 @@ export async function claimMission(id: string): Promise<Result> {
           FROM locked_profile
           WHERE candidate.id = ${id}
             AND candidate.status = 'open'
+            AND candidate.payment_status = 'paid'
             AND candidate.scout_id IS NULL
             AND candidate.archived_at IS NULL
           RETURNING candidate.id
@@ -398,6 +424,12 @@ export async function submitMissionResults(
     const bundleContext = await requireActiveBundleLeg(mission);
     const ready = mission.type === "move" ? mission.status === "at_dropoff" : mission.status === "onsite";
     if (!ready) throw new Error("Finish the mission steps before submitting results.");
+    const [acceptedUnpaidOrder] = await getDb().select({ id: missionChangeOrders.id }).from(missionChangeOrders).where(and(
+      eq(missionChangeOrders.missionId, id),
+      eq(missionChangeOrders.status, "pending"),
+      sql`${missionChangeOrders.approvedByUserId} IS NOT NULL`,
+    )).limit(1);
+    if (acceptedUnpaidOrder) throw new Error("Customer payment for an accepted additional task must clear before results can be submitted.");
     if (mission.deliveryPinRequired && !mission.deliveryPinVerifiedAt) {
       throw new Error("Verify the recipient’s delivery PIN before submitting this delivery.");
     }
@@ -456,13 +488,15 @@ export async function submitMissionResults(
     if (mission.type === "meet" && mission.pickupLatitude && mission.pickupLongitude) {
       if (!mission.billableStartedAt) throw new Error("Verified appointment time has not started.");
       const lastVerifiedAt = mission.billableLastVerifiedAt ?? mission.billableStartedAt;
-      const verifiedEndMs = Math.min(
-        now.getTime(),
-        lastVerifiedAt.getTime() + 60_000,
-        mission.billableStartedAt.getTime() + mission.meetAuthorizedMinutes * 60_000,
-      );
-      const billableMinutes = Math.max(1, Math.ceil((verifiedEndMs - mission.billableStartedAt.getTime()) / 60_000));
-      const chargedMinutes = Math.min(mission.meetAuthorizedMinutes, Math.max(60, Math.ceil(billableMinutes / 15) * 15));
+      const verifiedEndMs = mission.billableEndedAt?.getTime() ?? Math.min(
+          now.getTime(),
+          lastVerifiedAt.getTime() + 60_000,
+          mission.billableStartedAt.getTime() + mission.meetAuthorizedMinutes * 60_000,
+        );
+      const billableMinutes = mission.billableMinutes
+        ?? Math.max(1, Math.ceil((verifiedEndMs - mission.billableStartedAt.getTime()) / 60_000));
+      const chargedMinutes = mission.chargedMinutes
+        ?? Math.min(mission.meetAuthorizedMinutes, Math.max(60, Math.ceil(billableMinutes / 15) * 15));
       const finalPrice = meetPriceForMinutes(chargedMinutes);
       const reportCustomerCents = mission.enhancedReportRequested ? enhancedReportCustomerCents : 0;
       const reportScoutCents = mission.enhancedReportRequested ? enhancedReportScoutCents : 0;
@@ -470,10 +504,10 @@ export async function submitMissionResults(
         billableEndedAt: new Date(verifiedEndMs),
         billableMinutes,
         chargedMinutes,
-        customerPriceCents: finalPrice.customer + reportCustomerCents + acceptedChanges.customerCents,
+        customerPriceCents: finalPrice.customer + reportCustomerCents + acceptedChanges.customerCents - mission.bundleDiscountCents,
         scoutPayoutCents: finalPrice.scout + reportScoutCents + acceptedChanges.scoutCents,
         platformFeeCents: finalPrice.customer - finalPrice.scout
-          + reportCustomerCents - reportScoutCents + acceptedChanges.platformCents,
+          + reportCustomerCents - reportScoutCents + acceptedChanges.platformCents - mission.bundleDiscountCents,
         verifiedCheckOutAt: new Date(verifiedEndMs),
       };
     }
@@ -553,6 +587,58 @@ export async function submitMissionResults(
     const bundleCustomerDeltaCents = finalizedCustomerPriceCents - mission.customerPriceCents;
     const bundleScoutDeltaCents = finalizedScoutPayoutCents - mission.scoutPayoutCents;
     const bundlePlatformDeltaCents = finalizedPlatformFeeCents - mission.platformFeeCents;
+    if (mission.type === "meet") {
+      if (bundleCustomerDeltaCents < 0 || bundleScoutDeltaCents < 0 || bundlePlatformDeltaCents < 0) {
+        throw new Error("The finalized appointment price does not match the paid booking. Contact support before submitting results.");
+      }
+      if (bundleCustomerDeltaCents > 0) {
+        if (!billingChanges.billableEndedAt || !billingChanges.billableMinutes || !billingChanges.chargedMinutes) {
+          throw new Error("The verified appointment billing snapshot is incomplete.");
+        }
+        if (!mission.billableEndedAt) {
+          const [frozen] = await db.update(missions).set({
+            billableEndedAt: billingChanges.billableEndedAt,
+            billableMinutes: Number(billingChanges.billableMinutes),
+            chargedMinutes: Number(billingChanges.chargedMinutes),
+            verifiedCheckOutAt: billingChanges.verifiedCheckOutAt ?? billingChanges.billableEndedAt,
+            locationSharingActive: false,
+            scoutLatitude: null,
+            scoutLongitude: null,
+            scoutLocationAccuracyMeters: null,
+            scoutLocationUpdatedAt: null,
+            updatedAt: now,
+          }).where(and(
+            eq(missions.id, id),
+            eq(missions.scoutId, user.id),
+            eq(missions.status, mission.status),
+            isNull(missions.billableEndedAt),
+            isNull(missions.archivedAt),
+          )).returning({ id: missions.id });
+          if (!frozen) throw new Error("The appointment billing snapshot changed. Refresh before submitting again.");
+        }
+
+        const adjustment = await ensureAddonPayment({
+          kind: "meet_adjustment",
+          missionId: id,
+          customerId: mission.customerId,
+          amountCents: bundleCustomerDeltaCents,
+          scoutPayoutCents: bundleScoutDeltaCents,
+        });
+        const paymentAttempt = await attemptSavedPayment(adjustment.id);
+        if (paymentAttempt.state !== "paid") {
+          await notifyUser({
+            recipientUserId: mission.customerId,
+            missionId: id,
+            kind: "meet_adjustment_payment_required",
+            title: "Appointment payment confirmation required",
+            body: `Confirm the additional $${(bundleCustomerDeltaCents / 100).toFixed(2)} for verified appointment time before the Scout can submit results.`,
+            actionLabel: "Open payments",
+            actionUrl: "https://sendascout.com/dashboard/customer/payments",
+          });
+          throw new Error("Verified appointment time is saved, but customer payment must clear before results can be submitted.");
+        }
+      }
+    }
     let resultNotification: Parameters<typeof notifyUser>[0];
     let additionalRefreshId: string | null = null;
     let transitionQuery: BatchItem<"pg">;
@@ -869,6 +955,7 @@ export async function approveMeetExtension(id: string): Promise<Result> {
     const user = await requireAppUser("customer");
     const mission = await getMission(id);
     if (mission.customerId !== user.id || mission.type !== "meet" || mission.status !== "onsite") throw new Error("This appointment cannot be extended right now.");
+    if (mission.billableEndedAt) throw new Error("The verified appointment time is already finalized and cannot be extended.");
     await requireActiveBundleLeg(mission);
     if (mission.meetAuthorizedMinutes >= 480) throw new Error("The maximum appointment authorization is eight hours.");
     const authorizedMinutes = mission.meetAuthorizedMinutes + 60;
@@ -879,13 +966,14 @@ export async function approveMeetExtension(id: string): Promise<Result> {
     const db = getDb();
     const [updated] = await db.update(missions).set({
       meetAuthorizedMinutes: authorizedMinutes,
-      maximumCustomerPriceCents: maximum.customer + reportCustomerCents + acceptedChanges.customerCents,
+      maximumCustomerPriceCents: maximum.customer + reportCustomerCents + acceptedChanges.customerCents - mission.bundleDiscountCents,
       maximumScoutPayoutCents: maximum.scout + reportScoutCents + acceptedChanges.scoutCents,
       updatedAt: new Date(),
     }).where(and(
       eq(missions.id, id),
       eq(missions.customerId, user.id),
       eq(missions.status, "onsite"),
+      isNull(missions.billableEndedAt),
       eq(missions.meetAuthorizedMinutes, mission.meetAuthorizedMinutes),
       sql`${missions.maximumCustomerPriceCents} IS NOT DISTINCT FROM ${mission.maximumCustomerPriceCents}`,
       sql`${missions.maximumScoutPayoutCents} IS NOT DISTINCT FROM ${mission.maximumScoutPayoutCents}`,
@@ -916,6 +1004,7 @@ export async function requestMissionChangeOrder(id: string, description: string)
     await getDb().update(missionChangeOrders).set({ status: "expired", updatedAt: now }).where(and(
       eq(missionChangeOrders.missionId, id),
       eq(missionChangeOrders.status, "pending"),
+      isNull(missionChangeOrders.approvedByUserId),
       sql`${missionChangeOrders.expiresAt} IS NOT NULL AND ${missionChangeOrders.expiresAt} <= ${now}`,
     ));
     const [existing] = await getDb().select({ id: missionChangeOrders.id }).from(missionChangeOrders).where(and(
@@ -997,6 +1086,7 @@ export async function respondMissionChangeOrder(id: string, orderId: string, acc
       eq(missionChangeOrders.missionId, id),
     )).limit(1);
     if (!order || order.status !== "pending") throw new Error("This additional task request is no longer pending.");
+    if (order.approvedByUserId && !accept) throw new Error("Both participants already accepted this task. Its payment is still pending.");
     if (order.proposedByUserId === user.id) throw new Error("The other mission participant must respond to this request.");
     const now = new Date();
     if (order.expiresAt && order.expiresAt.getTime() <= now.getTime()) {
@@ -1004,6 +1094,7 @@ export async function respondMissionChangeOrder(id: string, orderId: string, acc
         eq(missionChangeOrders.id, orderId),
         eq(missionChangeOrders.missionId, id),
         eq(missionChangeOrders.status, "pending"),
+        isNull(missionChangeOrders.approvedByUserId),
         sql`${missionChangeOrders.expiresAt} IS NOT NULL AND ${missionChangeOrders.expiresAt} <= ${now}`,
       ));
       refreshMission(id);
@@ -1013,6 +1104,7 @@ export async function respondMissionChangeOrder(id: string, orderId: string, acc
       const [declined] = await getDb().update(missionChangeOrders).set({ status: "declined", declinedAt: now, updatedAt: now }).where(and(
         eq(missionChangeOrders.id, orderId),
         eq(missionChangeOrders.status, "pending"),
+        isNull(missionChangeOrders.approvedByUserId),
         sql`EXISTS (
           SELECT 1 FROM missions AS active_mission
           WHERE active_mission.id = ${id}
@@ -1024,85 +1116,61 @@ export async function respondMissionChangeOrder(id: string, orderId: string, acc
       if (!declined) throw new Error("The request changed in another window. Refresh before trying again.");
       await notifyUser({ recipientUserId: order.proposedByUserId, missionId: id, kind: "change_order_declined", title: "Additional task declined", body: "The additional task was not approved. Continue only with the original mission instructions.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
     } else {
-      let approved: Awaited<ReturnType<ReturnType<typeof getDb>["execute"]>>;
-      try {
-        approved = await getDb().execute(sql`
-        WITH accepted AS (
-          UPDATE mission_change_orders AS requested
-          SET status = 'approved', approved_by_user_id = ${user.id}, approved_at = ${now}, updated_at = ${now}
-          WHERE requested.id = ${orderId}
-            AND requested.mission_id = ${id}
-            AND requested.status = 'pending'
-            AND requested.proposed_by_user_id <> ${user.id}
-            AND (requested.expires_at IS NULL OR requested.expires_at > ${now})
-            AND EXISTS (
-              SELECT 1 FROM missions AS active_mission
-              WHERE active_mission.id = requested.mission_id
-                AND active_mission.archived_at IS NULL
-                AND active_mission.status IN ('claimed', 'en_route', 'onsite', 'en_route_pickup', 'at_pickup', 'en_route_dropoff', 'at_dropoff')
-                AND (${user.id} = active_mission.customer_id OR ${user.id} = active_mission.scout_id)
-                AND (
-                  active_mission.bundle_id IS NULL
-                  OR EXISTS (
-                    SELECT 1 FROM mission_bundles AS active_bundle
-                    WHERE active_bundle.id = active_mission.bundle_id
-                      AND active_bundle.active_sequence = active_mission.bundle_sequence
-                      AND active_bundle.status IN ('claimed', 'in_progress')
-                  )
+      if (!order.approvedByUserId) {
+        const [accepted] = await getDb().update(missionChangeOrders).set({
+          approvedByUserId: user.id,
+          approvedAt: now,
+          expiresAt: null,
+          updatedAt: now,
+        }).where(and(
+          eq(missionChangeOrders.id, orderId),
+          eq(missionChangeOrders.missionId, id),
+          eq(missionChangeOrders.status, "pending"),
+          isNull(missionChangeOrders.approvedByUserId),
+          ne(missionChangeOrders.proposedByUserId, user.id),
+          sql`${missionChangeOrders.expiresAt} IS NULL OR ${missionChangeOrders.expiresAt} > ${now}`,
+          sql`EXISTS (
+            SELECT 1 FROM missions AS active_mission
+            WHERE active_mission.id = ${id}
+              AND active_mission.archived_at IS NULL
+              AND active_mission.status IN ('claimed', 'en_route', 'onsite', 'en_route_pickup', 'at_pickup', 'en_route_dropoff', 'at_dropoff')
+              AND (${user.id} = active_mission.customer_id OR ${user.id} = active_mission.scout_id)
+              AND (
+                active_mission.bundle_id IS NULL
+                OR EXISTS (
+                  SELECT 1 FROM mission_bundles AS active_bundle
+                  WHERE active_bundle.id = active_mission.bundle_id
+                    AND active_bundle.active_sequence = active_mission.bundle_sequence
+                    AND active_bundle.status IN ('claimed', 'in_progress')
                 )
-            )
-          RETURNING requested.customer_delta_cents, requested.scout_delta_cents, requested.platform_delta_cents
-        )
-        , updated_mission AS (
-          UPDATE missions AS mission
-          SET customer_price_cents = mission.customer_price_cents + accepted.customer_delta_cents,
-              list_customer_price_cents = CASE WHEN mission.list_customer_price_cents IS NULL THEN NULL ELSE mission.list_customer_price_cents + accepted.customer_delta_cents END,
-              scout_payout_cents = mission.scout_payout_cents + accepted.scout_delta_cents,
-              platform_fee_cents = mission.platform_fee_cents + accepted.platform_delta_cents,
-              maximum_customer_price_cents = CASE WHEN mission.maximum_customer_price_cents IS NULL THEN NULL ELSE mission.maximum_customer_price_cents + accepted.customer_delta_cents END,
-              maximum_scout_payout_cents = CASE WHEN mission.maximum_scout_payout_cents IS NULL THEN NULL ELSE mission.maximum_scout_payout_cents + accepted.scout_delta_cents END,
-              updated_at = ${now}
-          FROM accepted
-          WHERE mission.id = ${id}
-            AND mission.archived_at IS NULL
-            AND mission.status IN ('claimed', 'en_route', 'onsite', 'en_route_pickup', 'at_pickup', 'en_route_dropoff', 'at_dropoff')
-          RETURNING mission.id, mission.bundle_id, mission.bundle_sequence, accepted.customer_delta_cents, accepted.scout_delta_cents, accepted.platform_delta_cents
-        ), updated_bundle AS (
-          UPDATE mission_bundles AS bundle
-          SET list_customer_price_cents = bundle.list_customer_price_cents + updated_mission.customer_delta_cents,
-              customer_price_cents = bundle.customer_price_cents + updated_mission.customer_delta_cents,
-              scout_payout_cents = bundle.scout_payout_cents + updated_mission.scout_delta_cents,
-              platform_fee_cents = bundle.platform_fee_cents + updated_mission.platform_delta_cents,
-              updated_at = ${now}
-          FROM updated_mission
-          WHERE updated_mission.bundle_id IS NOT NULL
-            AND bundle.id = updated_mission.bundle_id
-            AND bundle.active_sequence = updated_mission.bundle_sequence
-            AND bundle.status IN ('claimed', 'in_progress')
-          RETURNING bundle.id
-        )
-        SELECT CASE
-          WHEN (SELECT COUNT(*) FROM updated_mission) = 1
-            AND (
-              (SELECT bundle_id FROM updated_mission) IS NULL
-              OR (SELECT COUNT(*) FROM updated_bundle) = 1
-            )
-          THEN (SELECT id::text FROM updated_mission)
-          ELSE (
-            1 / (
-              (SELECT COUNT(*)::integer FROM updated_mission)
-              - (SELECT COUNT(*)::integer FROM updated_mission)
-            )
-          )::text
-        END AS id
-        `);
-      } catch {
-        throw new Error("The mission or request changed in another window. Refresh before trying again.");
+              )
+          )`,
+        )).returning({ id: missionChangeOrders.id });
+        if (!accepted) throw new Error("The mission or request changed in another window. Refresh before trying again.");
       }
-      if ((approved as unknown as { id: string }[]).length === 0) throw new Error("The mission or request changed in another window. Refresh before trying again.");
-      await notifyUser({ recipientUserId: order.proposedByUserId, missionId: id, kind: "change_order_approved", title: "Additional task approved", body: `The additional task is authorized. The customer total increased by $${(order.customerDeltaCents / 100).toFixed(0)} and the Scout payout increased by $${(order.scoutDeltaCents / 100).toFixed(0)}.`, actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
+
+      const payment = await ensureAddonPayment({
+        kind: "change_order",
+        missionId: id,
+        customerId: mission.customerId,
+        missionChangeOrderId: order.id,
+        amountCents: order.customerDeltaCents,
+        scoutPayoutCents: order.scoutDeltaCents,
+      });
+      const paymentAttempt = await attemptSavedPayment(payment.id);
+      if (paymentAttempt.state !== "paid") {
+        await notifyUser({
+          recipientUserId: mission.customerId,
+          missionId: id,
+          kind: "change_order_payment_required",
+          title: "Payment confirmation required",
+          body: "Both participants accepted the additional task. Confirm its payment before any extra work begins.",
+          actionLabel: "Open payments",
+          actionUrl: "https://sendascout.com/dashboard/customer/payments",
+        });
+      }
     }
-    await getDb().insert(missionUpdates).values({ missionId: id, authorId: user.id, status: mission.status, message: accept ? "Both participants approved the additional task and exact price." : "The additional task request was declined." });
+    await getDb().insert(missionUpdates).values({ missionId: id, authorId: user.id, status: mission.status, message: accept ? "Both participants accepted the exact price. Additional work is authorized only after customer payment clears." : "The additional task request was declined." });
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -1188,10 +1256,31 @@ export async function confirmMissionComplete(id: string, rating: number, review:
           AND result.status = 'submitted'
         RETURNING result.id
       ), saved_review AS (
-        INSERT INTO mission_reviews (mission_id, customer_id, scout_id, rating, review, tip_cents)
-        SELECT completed_mission.id, completed_mission.customer_id, completed_mission.scout_id, ${rating}, ${cleanReview || null}, ${tipCents}
+        INSERT INTO mission_reviews (mission_id, customer_id, scout_id, rating, review, tip_cents, tip_status)
+        SELECT completed_mission.id, completed_mission.customer_id, completed_mission.scout_id, ${rating}, ${cleanReview || null}, ${tipCents},
+          CASE WHEN ${tipCents} > 0 THEN 'pending'::payment_status ELSE 'unpaid'::payment_status END
         FROM completed_mission
-        RETURNING scout_id
+        RETURNING id, mission_id, customer_id, scout_id
+      ), saved_tip_payment AS (
+        INSERT INTO payments (
+          mission_id, bundle_id, customer_id, mission_review_id, kind, currency,
+          stripe_customer_id, livemode, stripe_transfer_group, idempotency_key,
+          amount_cents, scout_payout_cents, platform_fee_cents, status, created_at, updated_at
+        )
+        SELECT saved_review.mission_id, NULL, saved_review.customer_id, saved_review.id, 'tip', booking.currency,
+          booking.stripe_customer_id, booking.livemode, booking.stripe_transfer_group,
+          'tip:' || saved_review.id::text || ':v1', ${tipCents}, ${tipCents}, 0, 'pending', ${now}, ${now}
+        FROM saved_review
+        INNER JOIN completed_mission ON completed_mission.id = saved_review.mission_id
+        INNER JOIN payments AS booking ON booking.kind = 'booking'
+          AND booking.status = 'paid'
+          AND (
+            (completed_mission.bundle_id IS NULL AND booking.mission_id = completed_mission.id)
+            OR (completed_mission.bundle_id IS NOT NULL AND booking.bundle_id = completed_mission.bundle_id)
+          )
+        WHERE ${tipCents} > 0
+        ON CONFLICT DO NOTHING
+        RETURNING id
       ), updated_scout AS (
         UPDATE scout_profiles AS profile
         SET completed_missions = profile.completed_missions + 1,
@@ -1216,13 +1305,47 @@ export async function confirmMissionComplete(id: string, rating: number, review:
           )
         THEN (SELECT id::text FROM saved_update)
         ELSE (1 / ((SELECT COUNT(*)::integer FROM saved_update) - (SELECT COUNT(*)::integer FROM saved_update)))::text
-      END AS id
+      END AS id,
+      (SELECT id::text FROM saved_review) AS review_id,
+      (SELECT id::text FROM saved_tip_payment) AS tip_payment_id
       `);
     } catch {
       throw new Error("The mission changed in another window. Refresh before trying again.");
     }
-    if ((completed as unknown as { id: string }[]).length === 0) throw new Error("The mission changed in another window. Refresh before trying again.");
-    await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_confirmed", title: "Mission confirmed", body: `The customer confirmed completion and left a ${rating}-star rating.${tipCents ? ` A ${`$${(tipCents / 100).toFixed(0)}`} tip will be processed when payments are active.` : ""}`, actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
+    const completion = (completed as unknown as Array<{ id: string; review_id: string; tip_payment_id: string | null }>)[0];
+    if (!completion?.id) throw new Error("The mission changed in another window. Refresh before trying again.");
+    await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_confirmed", title: "Mission confirmed", body: `The customer confirmed completion and left a ${rating}-star rating.${tipCents ? " A tip was requested and will appear in earnings after its payment clears." : ""}`, actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
+    await settleMissionBestEffort(id, "customer_confirmation");
+    if (tipCents > 0) {
+      try {
+        const tipPayment = completion.tip_payment_id
+          ? (await db.select().from(payments).where(eq(payments.id, completion.tip_payment_id)).limit(1))[0]
+          : await ensureAddonPayment({
+            kind: "tip",
+            missionId: id,
+            customerId: mission.customerId,
+            missionReviewId: completion.review_id,
+            amountCents: tipCents,
+            scoutPayoutCents: tipCents,
+          });
+        if (tipPayment) {
+          const tipAttempt = await attemptSavedPayment(tipPayment.id);
+          if (tipAttempt.state !== "paid") {
+            await notifyUser({
+              recipientUserId: mission.customerId,
+              missionId: id,
+              kind: "tip_payment_required",
+              title: "Tip payment confirmation required",
+              body: "Your mission is complete. Confirm the optional tip separately from the Payments page.",
+              actionLabel: "Open payments",
+              actionUrl: "https://sendascout.com/dashboard/customer/payments",
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Optional tip payment could not be started", { missionId: id, error });
+      }
+    }
     refreshMission(id);
     return { ok: true };
   } catch (error) {
@@ -1275,6 +1398,12 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
       canMove: scoutProfiles.canMove,
       canMeet: scoutProfiles.canMeet,
       verificationConsentedAt: scoutProfiles.verificationConsentedAt,
+      stripeAccountId: scoutProfiles.stripeAccountId,
+      stripeAccountLivemode: scoutProfiles.stripeAccountLivemode,
+      stripeConnectStatus: scoutProfiles.stripeConnectStatus,
+      stripeTransfersActive: scoutProfiles.stripeTransfersActive,
+      payoutsEnabled: scoutProfiles.payoutsEnabled,
+      stripePayoutScheduleConfiguredAt: scoutProfiles.stripePayoutScheduleConfiguredAt,
       firstName: users.firstName,
       lastName: users.lastName,
       phone: users.phone,
@@ -1282,7 +1411,7 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
     }).from(scoutProfiles).innerJoin(users, eq(users.id, scoutProfiles.userId)).where(eq(scoutProfiles.id, profileId)).limit(1);
     if (!existing) throw new Error("Scout profile not found.");
     if (status === "approved") {
-      const missing = scoutApprovalChecklist(existing, LEGAL_VERSION).filter((item) => !item.complete);
+      const missing = scoutApprovalChecklist(existing, LEGAL_VERSION, getStripeLivemode()).filter((item) => !item.complete);
       if (missing.length) throw new Error(`Complete the approval checklist first: ${missing.map((item) => item.label).join(", ")}.`);
     }
     const [profile] = await getDb().update(scoutProfiles).set({
@@ -1339,8 +1468,15 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
     const bundleContext = await getBundleContext(mission);
     const rootMission = bundleContext?.legs[0] ?? mission;
     const now = new Date();
+    if (status === "open" && (rootMission.paymentStatus !== "paid" || (bundleContext && bundleContext.bundle.paymentStatus !== "paid"))) {
+      throw new Error("Only bookings with confirmed customer payment can be opened to Scouts.");
+    }
     if (mission.status === "disputed" || bundleContext?.bundle.status === "disputed") {
       throw new Error("Resolve the open mission case instead of using a direct status override.");
+    }
+    const effectivePaymentStatus = bundleContext?.bundle.paymentStatus ?? mission.paymentStatus;
+    if (status === "cancelled" && ["authorized", "paid", "partially_refunded", "refunded", "disputed"].includes(effectivePaymentStatus)) {
+      throw new Error("Paid bookings must be cancelled through a mission case so the customer refund and Scout payout decisions are recorded together.");
     }
     const [openCase] = await db.select({ id: missionCases.id }).from(missionCases)
       .innerJoin(missions, eq(missions.id, missionCases.missionId))
@@ -1602,6 +1738,7 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
       await notifyUser({ recipientUserId: mission.customerId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled. Any eligible payment adjustment will follow the cancellation policy.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
       if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled and removed from your active work.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
     }
+    if (status === "completed") await settleMissionBestEffort(rootMission.id, "admin_status_override");
     refreshMission(id);
     return { ok: true };
   } catch (error) {

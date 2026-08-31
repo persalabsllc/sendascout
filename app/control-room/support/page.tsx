@@ -10,7 +10,7 @@ import type { CustomerSupportReason, CustomerSupportResolution } from "@/lib/cus
 export const metadata = { title: "Customer Support | Send a Scout Control Room", robots: { index: false, follow: false } };
 
 export default async function ControlRoomSupportPage() {
-  await requireAdminUser();
+  const admin = await requireAdminUser();
   const db = getDb();
   const ticketRows = await db.select({ ticket: customerSupportTickets, customer: users, mission: missions, bundle: missionBundles })
     .from(customerSupportTickets)
@@ -50,6 +50,12 @@ export default async function ControlRoomSupportPage() {
         resolutionAmountCents: ticket.resolutionAmountCents,
         resolutionNote: ticket.resolutionNote,
         customerDecision: ticket.customerDecision,
+        financialApprovalPending: ticket.status === "open"
+          && ["full_refund", "partial_refund"].includes(ticket.resolutionType ?? "")
+          && ticket.resolutionAmountCents > 10_000
+          && Boolean(ticket.proposedBy)
+          && !ticket.financialApprovedBy,
+        proposedByCurrentAdmin: ticket.proposedBy === admin.id,
         createdAt: ticket.createdAt.toISOString(),
         updatedAt: ticket.updatedAt.toISOString(),
         messages: messagesByTicket.get(ticket.id) ?? [],

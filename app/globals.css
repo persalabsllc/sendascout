@@ -435,6 +435,19 @@ button, input, textarea, select { font: inherit; }
 .scout-banner strong { font-size: 13px; }
 .scout-banner p { margin: 3px 0 0; color: #a9bdc8; font-size: 9px; }
 .scout-banner .status { background: rgba(9,198,181,.17); color: #54dfd0; }
+.payout-account-card { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 17px; margin-bottom: 20px; padding: 22px; border: 1px solid #dbe7e6; border-radius: 18px; background: white; }
+.payout-account-card.ready { border-color: #bfe6df; background: linear-gradient(135deg, #fff 0%, #f2fbf9 100%); }
+.payout-account-card.needs-action { border-color: #f1c9bc; background: linear-gradient(135deg, #fff 0%, #fff7f3 100%); }
+.payout-account-icon { width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; background: #e5f7f4; color: var(--teal); }
+.payout-account-card.needs-action .payout-account-icon { background: #fff0eb; color: var(--coral); }
+.payout-account-main { min-width: 0; }
+.payout-account-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.payout-account-heading h2 { margin: 3px 0 8px; color: var(--navy); font-size: 19px; }
+.payout-account-main > p { margin: 0 0 10px; color: #61737c; font-size: 12px; line-height: 1.55; }
+.payout-account-main ul { margin: 8px 0 13px; padding-left: 20px; color: #7b4c42; font-size: 11px; line-height: 1.55; }
+.payout-account-note { color: #7b8990 !important; font-size: 10px !important; }
+.payout-account-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.payout-account-actions .button { min-height: 39px; padding: 9px 13px; font-size: 10px; }
 .scout-stats .stat-card:nth-child(2) > span { background: #fff0eb; color: var(--coral); }
 .scout-list article { grid-template-columns: 44px minmax(0, 1fr) auto 54px; }
 .scout-list .mission-list-row { grid-template-columns: 44px minmax(0, 1fr) auto 54px; }
@@ -852,6 +865,9 @@ button, input, textarea, select { font: inherit; }
   .scout-list .claim-button { grid-column: 3; grid-row: 2; }
   .scout-banner { grid-template-columns: 40px 1fr; }
   .scout-banner .status { grid-column: 2; justify-self: start; }
+  .payout-account-card { grid-template-columns: 1fr; padding: 18px; }
+  .payout-account-heading { flex-direction: column; gap: 5px; }
+  .payout-account-actions .button { width: 100%; }
   .notification-strip { align-items: flex-start; }
   .notification-center-heading { align-items: flex-start; }
   .notification-center-list article { grid-template-columns: 10px 1fr; }
