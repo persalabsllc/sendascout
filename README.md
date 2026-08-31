@@ -28,6 +28,8 @@ npm run build
 
 The migration runner validates that the database ledger is a contiguous, hash-matching prefix of the repository, performs Stripe-ledger preflight checks, and applies all pending migrations atomically.
 
+> Incident recovery: `vercel.json` temporarily uses a Production-only build wrapper that creates the `pre_stripe_production_20260831` recovery schema and runs the migration before the application build. Preview and local builds remain migration-free. Remove the wrapper after migration `0016_stripe_connect` is verified in Production.
+
 ## Stripe Connect launch controls
 
 Stripe Connect uses separate event destinations because Stripe assigns one payload format and signing secret to each destination. Configure a snapshot destination for connected-account `payout.*` and `balance_settings.updated` events with `STRIPE_CONNECT_SNAPSHOT_WEBHOOK_SECRET`, and a thin destination for Accounts v2 events with `STRIPE_CONNECT_THIN_WEBHOOK_SECRET`. Both destinations can target `/api/webhooks/stripe/connect`.

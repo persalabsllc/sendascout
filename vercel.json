@@ -1,4 +1,5 @@
 {
+  "buildCommand": "node scripts/vercel-build.mjs",
   "crons": [
     {
       "path": "/api/cron/auto-complete",
