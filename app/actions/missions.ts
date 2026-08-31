@@ -64,6 +64,15 @@ const changeOrderScoutCents = 600;
 const enhancedReportCustomerCents = ENHANCED_REPORT_CUSTOMER_CENTS;
 const enhancedReportScoutCents = ENHANCED_REPORT_SCOUT_CENTS;
 
+function databaseErrorCode(error: unknown) {
+  let current = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth += 1) {
+    if ("code" in current && typeof current.code === "string") return current.code;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return undefined;
+}
+
 const activeStatuses: MissionStatus[] = [
   "claimed", "en_route", "onsite", "en_route_pickup", "at_pickup", "en_route_dropoff", "at_dropoff", "submitted",
 ];
@@ -643,7 +652,7 @@ export async function submitMissionResults(
     let additionalRefreshId: string | null = null;
     let transitionQuery: BatchItem<"pg">;
     if (bundleContext && nextLeg) {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
+      transitionQuery = db.execute<{ id: string }>(sql`
         WITH finished AS (
           UPDATE missions AS current_part
           SET status = 'completed',
@@ -716,11 +725,10 @@ export async function submitMissionResults(
           ELSE (1 / ((SELECT COUNT(*)::integer FROM progressed_bundle) - (SELECT COUNT(*)::integer FROM progressed_bundle)))::text
         END AS id
       `);
-      transitionQuery = db.with(transition).select({ id: transition.id }).from(transition);
       resultNotification = { recipientUserId: mission.customerId, missionId: nextLeg.id, kind: "bundle_part_ready", title: "The next mission part is ready", body: `Your Scout completed part ${mission.bundleSequence} of ${bundleContext.legs.length} and can now begin the next part.`, actionLabel: "Track next part", actionUrl: `https://sendascout.com/dashboard/missions/${nextLeg.id}` };
       additionalRefreshId = nextLeg.id;
     } else if (bundleContext) {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
+      transitionQuery = db.execute<{ id: string }>(sql`
         WITH submitted_part AS (
           UPDATE missions AS current_part
           SET status = 'submitted',
@@ -772,10 +780,9 @@ export async function submitMissionResults(
           ELSE (1 / ((SELECT COUNT(*)::integer FROM submitted_bundle) - (SELECT COUNT(*)::integer FROM submitted_bundle)))::text
         END AS id
       `);
-      transitionQuery = db.with(transition).select({ id: transition.id }).from(transition);
       resultNotification = { recipientUserId: mission.customerId, missionId: id, kind: "results_submitted", title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready", body: "All mission parts are complete. Review the results and confirm completion within 24 hours.", actionLabel: "Review results", actionUrl: `https://sendascout.com/dashboard/missions/${id}` };
     } else {
-      const transition = db.$with("mission_result_transition", { id: sql<string>`id`.as("id") }).as(sql`
+      transitionQuery = db.execute<{ id: string }>(sql`
         WITH submitted_mission AS (
           UPDATE missions AS current_mission
           SET status = 'submitted',
@@ -809,13 +816,22 @@ export async function submitMissionResults(
           ELSE (1 / ((SELECT COUNT(*)::integer FROM submitted_mission) - (SELECT COUNT(*)::integer FROM submitted_mission)))::text
         END AS id
       `);
-      transitionQuery = db.with(transition).select({ id: transition.id }).from(transition);
       resultNotification = { recipientUserId: mission.customerId, missionId: id, kind: "results_submitted", title: mission.type === "move" ? "Delivery results are ready" : "Mission results are ready", body: "Your Scout submitted the mission results. Review them and confirm completion within 24 hours.", actionLabel: "Review results", actionUrl: `https://sendascout.com/dashboard/missions/${id}` };
     }
     try {
       await db.batch([transitionQuery, ...persistence]);
-    } catch {
-      throw new Error("The mission changed while results were being submitted. Refresh before continuing.");
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      console.error("Mission result persistence failed", {
+        missionId: id,
+        expectedStatus,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        databaseCode: code ?? "unknown",
+      });
+      if (code === "22012") {
+        throw new Error("The mission changed while results were being submitted. Refresh before continuing.");
+      }
+      throw new Error("We couldn't submit your results. Please try again. If this continues, contact support.");
     }
     await notifyUser(resultNotification);
     if (additionalRefreshId) refreshMission(additionalRefreshId);
