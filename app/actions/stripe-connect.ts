@@ -3,15 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { requireAppUser } from "@/lib/app-user";
-import { createScoutStripeAccountLink, createScoutStripeDashboardLink, syncScoutStripeAccount } from "@/lib/stripe-connect-service";
+import { createScoutStripeAccountLink, createScoutStripeDashboardLink, syncScoutStripeAccount, type ScoutPayoutOwnerType } from "@/lib/stripe-connect-service";
 
 type StripeLinkResult = { ok: true; url: string } | { ok: false; error: string };
 
-export async function startScoutStripeOnboarding(): Promise<StripeLinkResult> {
+export async function startScoutStripeOnboarding(payoutOwnerType?: ScoutPayoutOwnerType): Promise<StripeLinkResult> {
   try {
     const user = await requireAppUser("scout");
     if (user.role !== "scout") throw new Error("Only Scout accounts can set up payouts.");
-    return { ok: true, url: await createScoutStripeAccountLink(user.id) };
+    if (payoutOwnerType !== undefined && payoutOwnerType !== "individual" && payoutOwnerType !== "company") {
+      throw new Error("Choose a valid payout account type.");
+    }
+    return { ok: true, url: await createScoutStripeAccountLink(user.id, payoutOwnerType) };
   } catch (error) {
     unstable_rethrow(error);
     console.error("Scout Stripe onboarding could not start", error);

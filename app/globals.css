@@ -454,8 +454,22 @@ button, input, textarea, select { font: inherit; }
 .payout-account-main > p { margin: 0 0 10px; color: #61737c; font-size: 12px; line-height: 1.55; }
 .payout-account-main ul { margin: 8px 0 13px; padding-left: 20px; color: #7b4c42; font-size: 11px; line-height: 1.55; }
 .payout-account-note { color: #7b8990 !important; font-size: 10px !important; }
+.payout-account-choice { margin-top: 15px; padding: 16px; border: 1px solid #d7e4e3; border-radius: 14px; background: #fff; }
+.payout-account-choice h3 { margin: 0 0 5px; color: var(--navy); font-size: 15px; }
+.payout-account-choice > p { margin: 0 0 12px; color: #61737c; font-size: 12px; line-height: 1.55; }
+.payout-account-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.payout-account-choice-grid > button { min-height: 86px; padding: 13px; border: 1px solid #cadcda; border-radius: 12px; background: #f8fcfb; color: var(--navy); text-align: left; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.payout-account-choice-grid > button:hover { transform: translateY(-1px); border-color: var(--teal); box-shadow: 0 8px 18px rgba(8,43,69,.07); }
+.payout-account-choice-grid > button:focus-visible { outline: 3px solid #00796b; outline-offset: 2px; }
+.payout-account-choice-grid > button:disabled { cursor: wait; opacity: .65; }
+.payout-account-choice-grid strong, .payout-account-choice-grid small { display: block; }
+.payout-account-choice-grid strong { font-size: 13px; line-height: 1.35; }
+.payout-account-choice-grid strong span { display: inline-block; margin-left: 5px; padding: 3px 6px; border-radius: 999px; background: #dcf5f1; color: #00796b; font-size: 8px; text-transform: uppercase; letter-spacing: .45px; vertical-align: 1px; }
+.payout-account-choice-grid small { margin-top: 6px; color: #6e7e85; font-size: 11px; line-height: 1.5; }
+.payout-account-choice .payout-account-opening { margin: 10px 0 0; color: #00796b; font-size: 11px; font-weight: 800; }
+.payout-account-choice-cancel { min-height: 44px; margin-top: 8px; padding: 8px 4px; border: 0; background: transparent; color: #65767d; font-size: 11px; font-weight: 800; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .payout-account-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
-.payout-account-actions .button { min-height: 39px; padding: 9px 13px; font-size: 10px; }
+.payout-account-actions .button { min-height: 44px; padding: 10px 14px; font-size: 11px; }
 .scout-stats .stat-card:nth-child(2) > span { background: #fff0eb; color: var(--coral); }
 .scout-list article { grid-template-columns: 44px minmax(0, 1fr) auto 54px; }
 .scout-list .mission-list-row { grid-template-columns: 44px minmax(0, 1fr) auto 54px; }
@@ -877,6 +891,8 @@ button, input, textarea, select { font: inherit; }
   .scout-payout-required-action { grid-column: 2; }
   .payout-account-card { grid-template-columns: 1fr; padding: 18px; }
   .payout-account-heading { flex-direction: column; gap: 5px; }
+  .payout-account-choice-grid { grid-template-columns: 1fr; }
+  .payout-account-choice-grid > button { min-height: 76px; }
   .payout-account-actions .button { width: 100%; }
   .notification-strip { align-items: flex-start; }
   .notification-center-heading { align-items: flex-start; }

@@ -9,8 +9,11 @@ import { stripeBalanceSettingsUseRequiredFridaySchedule } from "@/lib/stripe-pay
 import { getAppUrl, getStripe, getStripeLivemode, stripeErrorDetails } from "@/lib/stripe";
 
 type AccountApiVersion = "v1" | "v2";
+export type ScoutPayoutOwnerType = "individual" | "company";
 
-export async function getOrCreateScoutStripeAccount(userId: string) {
+const SCOUT_SERVICE_DESCRIPTION = "Independent local task services performed through the Send a Scout marketplace, including pickup and delivery, site visits, photos, and appointment attendance.";
+
+export async function getOrCreateScoutStripeAccount(userId: string, payoutOwnerType?: ScoutPayoutOwnerType) {
   const db = getDb();
   const [row] = await db.select({ user: users, profile: scoutProfiles })
     .from(scoutProfiles)
@@ -32,7 +35,7 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
         updatedAt: new Date(),
       }).where(eq(scoutProfiles.id, row.profile.id));
     }
-    const synced = await syncStripeAccountProfile(row.profile.stripeAccountId, apiVersion);
+    const synced = await syncStripeAccountProfile(row.profile.stripeAccountId, apiVersion, payoutOwnerType);
     if (!synced) throw new Error("The saved Stripe payout account could not be synchronized.");
     return {
       accountId: row.profile.stripeAccountId,
@@ -40,6 +43,8 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
       profile: synced,
     };
   }
+
+  if (!payoutOwnerType) throw new Error("Choose whether Stripe should pay you personally or pay your registered business.");
 
   const stripe = getStripe();
   const displayName = [row.user.firstName, row.user.lastName].filter(Boolean).join(" ") || "Send a Scout Scout";
@@ -61,13 +66,29 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
       dashboard: "express",
       defaults: {
         currency: "usd",
+        locales: ["en-US"],
+        profile: {
+          product_description: SCOUT_SERVICE_DESCRIPTION,
+        },
         responsibilities: {
           fees_collector: "application",
           losses_collector: "application",
         },
       },
-      display_name: displayName,
-      identity: { country: "us" },
+      display_name: payoutOwnerType === "individual" ? displayName : undefined,
+      identity: payoutOwnerType === "individual" ? {
+        country: "us",
+        entity_type: "individual",
+        individual: {
+          email: row.user.email,
+          given_name: row.user.firstName ?? undefined,
+          phone: row.user.phone ?? undefined,
+          surname: row.user.lastName ?? undefined,
+        },
+      } : {
+        country: "us",
+        entity_type: "company",
+      },
       include: ["configuration.recipient", "requirements", "future_requirements"],
       metadata: {
         sendascout_user_id: row.user.id,
@@ -80,6 +101,10 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
     const details = stripeErrorDetails(error);
     if (details.code !== "accounts_v2_access_blocked") throw error;
     const account = await stripe.accounts.create({
+      business_profile: {
+        product_description: SCOUT_SERVICE_DESCRIPTION,
+      },
+      business_type: payoutOwnerType,
       capabilities: { transfers: { requested: true } },
       controller: {
         fees: { payer: "application" },
@@ -89,6 +114,12 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
       },
       country: "US",
       email: row.user.email,
+      individual: payoutOwnerType === "individual" ? {
+        email: row.user.email,
+        first_name: row.user.firstName ?? undefined,
+        last_name: row.user.lastName ?? undefined,
+        phone: row.user.phone ?? undefined,
+      } : undefined,
       metadata: {
         sendascout_user_id: row.user.id,
         sendascout_scout_profile_id: row.profile.id,
@@ -117,9 +148,9 @@ export async function getOrCreateScoutStripeAccount(userId: string) {
   };
 }
 
-export async function createScoutStripeAccountLink(userId: string) {
+export async function createScoutStripeAccountLink(userId: string, payoutOwnerType?: ScoutPayoutOwnerType) {
   const stripe = getStripe();
-  const account = await getOrCreateScoutStripeAccount(userId);
+  const account = await getOrCreateScoutStripeAccount(userId, payoutOwnerType);
   const appUrl = getAppUrl();
   const refreshUrl = `${appUrl}/api/stripe/connect/refresh`;
   const returnUrl = `${appUrl}/api/stripe/connect/return`;
@@ -202,16 +233,23 @@ export async function reconcileScoutPayoutReadiness(limit = 25) {
   return { found: rows.length, synced, errors };
 }
 
-async function syncStripeAccountProfile(accountId: string, apiVersion: AccountApiVersion) {
+async function syncStripeAccountProfile(accountId: string, apiVersion: AccountApiVersion, requestedOwnerType?: ScoutPayoutOwnerType) {
   const stripe = getStripe();
   let summary: StripeConnectSummary;
+  let actualOwnerType: string | null | undefined;
   if (apiVersion === "v2") {
     const account = await stripe.v2.core.accounts.retrieve(accountId, {
-      include: ["configuration.recipient", "requirements", "future_requirements"],
+      include: ["configuration.recipient", "identity", "requirements", "future_requirements"],
     });
+    actualOwnerType = account.identity?.entity_type;
     summary = summarizeV2ConnectAccount(account);
   } else {
-    summary = summarizeV1ConnectAccount(await stripe.accounts.retrieve(accountId));
+    const account = await stripe.accounts.retrieve(accountId);
+    actualOwnerType = account.business_type;
+    summary = summarizeV1ConnectAccount(account);
+  }
+  if (requestedOwnerType && actualOwnerType !== requestedOwnerType) {
+    throw new Error("This payout account was already created with a different legal account type. Refresh the page and continue the existing Stripe setup.");
   }
   if (summary.livemode !== getStripeLivemode()) throw new Error("The saved Stripe payout account belongs to a different Stripe mode.");
 
