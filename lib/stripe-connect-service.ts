@@ -3,7 +3,8 @@ import "server-only";
 import { and, asc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { scoutProfiles, users } from "@/db/schema";
-import { summarizeV1ConnectAccount, summarizeV2ConnectAccount, type StripeConnectSummary } from "@/lib/stripe-connect";
+import { scoutConnectReady, summarizeV1ConnectAccount, summarizeV2ConnectAccount, type StripeConnectSummary } from "@/lib/stripe-connect";
+import { alertScoutToOpenMissions } from "@/lib/notifications";
 import { stripeBalanceSettingsUseRequiredFridaySchedule } from "@/lib/stripe-payout-schedule";
 import { getAppUrl, getStripe, getStripeLivemode, stripeErrorDetails } from "@/lib/stripe";
 
@@ -217,6 +218,8 @@ async function syncStripeAccountProfile(accountId: string, apiVersion: AccountAp
   const db = getDb();
   const [existing] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.stripeAccountId, accountId)).limit(1);
   if (!existing) return null;
+  const expectedLivemode = getStripeLivemode();
+  const wasReady = scoutConnectReady(existing, expectedLivemode);
 
   let payoutScheduleConfiguredAt: Date | null = null;
   if (summary.transfersActive && summary.payoutsEnabled) {
@@ -269,6 +272,13 @@ async function syncStripeAccountProfile(accountId: string, apiVersion: AccountAp
     stripePayoutScheduleConfiguredAt: payoutScheduleConfiguredAt,
     updatedAt: now,
   }).where(eq(scoutProfiles.id, existing.id)).returning();
+  if (updated && updated.status === "approved" && !wasReady && scoutConnectReady(updated, expectedLivemode)) {
+    try {
+      await alertScoutToOpenMissions(updated.userId);
+    } catch (error) {
+      console.warn("Scout payouts became ready, but existing mission alerts could not be backfilled", error);
+    }
+  }
   return updated ?? null;
 }
 

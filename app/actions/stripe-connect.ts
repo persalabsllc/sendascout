@@ -26,6 +26,7 @@ export async function refreshScoutStripeStatus(): Promise<{ ok: true } | { ok: f
     await syncScoutStripeAccount(user.id);
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/earnings");
+    revalidatePath("/dashboard/scout/missions");
     revalidatePath("/dashboard/scout/settings");
     return { ok: true };
   } catch (error) {

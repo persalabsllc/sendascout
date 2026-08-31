@@ -20,8 +20,9 @@ export default async function ScoutDashboard() {
   if (!profileRow) redirect("/scout");
   const profile = profileRow.profile;
   const stripeLivemode = getStripeLivemode();
+  const payoutReady = scoutConnectReady(profile, stripeLivemode);
   const [rows, alertRows] = await Promise.all([
-    profile.status === "approved" && scoutConnectReady(profile, stripeLivemode)
+    profile.status === "approved" && payoutReady
       ? db.select().from(missions).where(and(isNull(missions.archivedAt), or(
         eq(missions.scoutId, user.id),
         and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
@@ -79,5 +80,5 @@ export default async function ScoutDashboard() {
       return !mission || !["completed", "cancelled", "disputed"].includes(mission.status);
     })
     .map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
-  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} />;
+  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} scoutPayoutReady={payoutReady} />;
 }

@@ -435,6 +435,14 @@ button, input, textarea, select { font: inherit; }
 .scout-banner strong { font-size: 13px; }
 .scout-banner p { margin: 3px 0 0; color: #a9bdc8; font-size: 9px; }
 .scout-banner .status { background: rgba(9,198,181,.17); color: #54dfd0; }
+.scout-payout-required-banner { margin-bottom: 16px; padding: 18px 20px; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 14px; border: 1px solid #f1c9bc; border-radius: 16px; background: linear-gradient(135deg, #fff 0%, #fff6f1 100%); color: var(--navy); box-shadow: 0 8px 24px rgba(8,43,69,.04); transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.scout-payout-required-banner:hover { transform: translateY(-1px); border-color: #e9a994; box-shadow: 0 12px 28px rgba(8,43,69,.08); }
+.scout-payout-required-banner:focus-visible { outline: 3px solid #00796b; outline-offset: 3px; }
+.scout-payout-required-icon { width: 43px; height: 43px; display: grid; place-items: center; border-radius: 12px; background: #fff0eb; color: var(--coral); }
+.scout-payout-required-banner strong { display: block; font-size: 13px; }
+.scout-payout-required-banner p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.scout-payout-required-action { display: inline-flex; align-items: center; gap: 5px; color: #b5442f; font-size: 12px; font-weight: 850; white-space: nowrap; text-underline-offset: 3px; }
+.scout-payout-required-banner:hover .scout-payout-required-action, .scout-payout-required-banner:focus-visible .scout-payout-required-action { text-decoration: underline; }
 .payout-account-card { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 17px; margin-bottom: 20px; padding: 22px; border: 1px solid #dbe7e6; border-radius: 18px; background: white; }
 .payout-account-card.ready { border-color: #bfe6df; background: linear-gradient(135deg, #fff 0%, #f2fbf9 100%); }
 .payout-account-card.needs-action { border-color: #f1c9bc; background: linear-gradient(135deg, #fff 0%, #fff7f3 100%); }
@@ -865,6 +873,8 @@ button, input, textarea, select { font: inherit; }
   .scout-list .claim-button { grid-column: 3; grid-row: 2; }
   .scout-banner { grid-template-columns: 40px 1fr; }
   .scout-banner .status { grid-column: 2; justify-self: start; }
+  .scout-payout-required-banner { grid-template-columns: 40px minmax(0, 1fr); padding: 16px; }
+  .scout-payout-required-action { grid-column: 2; }
   .payout-account-card { grid-template-columns: 1fr; padding: 18px; }
   .payout-account-heading { flex-direction: column; gap: 5px; }
   .payout-account-actions .button { width: 100%; }

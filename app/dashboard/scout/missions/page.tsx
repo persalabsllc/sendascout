@@ -2,6 +2,7 @@ import Link from "next/link";
 import { and, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { IconCamera, IconMapPin, IconRoute, IconClock } from "@tabler/icons-react";
 import { ScoutDashboardShell } from "@/components/scout-dashboard-shell";
+import { ScoutPayoutRequiredBanner } from "@/components/scout-payout-required-banner";
 import { getDb } from "@/db";
 import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
@@ -16,6 +17,7 @@ export default async function ScoutMissionsPage() {
   const db = getDb();
   const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
   const stripeLivemode = getStripeLivemode();
+  const payoutReady = Boolean(profile && scoutConnectReady(profile, stripeLivemode));
   const rows = await db.select().from(missions).where(and(isNull(missions.archivedAt), or(
     eq(missions.scoutId, user.id),
     and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
@@ -44,7 +46,7 @@ export default async function ScoutMissionsPage() {
   const hiddenReasons = new Set<ScoutMissionEligibilityReason>();
   const eligible = visibleRows.filter((mission) => {
     if (mission.scoutId === user.id) return true;
-    if (profile?.status !== "approved" || !scoutConnectReady(profile, stripeLivemode)) return false;
+    if (profile?.status !== "approved" || !payoutReady) return false;
     const legs = mission.bundleId ? legsByBundle.get(mission.bundleId) ?? [mission] : [mission];
     const reasons = legs.map((leg) => scoutMissionEligibility(leg, profile)).filter((reason): reason is ScoutMissionEligibilityReason => reason !== null);
     reasons.forEach((reason) => hiddenReasons.add(reason));
@@ -56,16 +58,17 @@ export default async function ScoutMissionsPage() {
   const active = eligible.filter((mission) => mission.scoutId === user.id && !["completed", "cancelled", "disputed"].includes(mission.status));
   const open = eligible.filter((mission) => mission.status === "open" && !mission.scoutId);
   const openCandidates = visibleRows.filter((mission) => mission.status === "open" && !mission.scoutId);
-  const unmatchedOpenCount = profile?.status === "approved" && scoutConnectReady(profile, stripeLivemode) ? Math.max(0, openCandidates.length - open.length) : 0;
+  const unmatchedOpenCount = profile?.status === "approved" && payoutReady ? Math.max(0, openCandidates.length - open.length) : 0;
   const openEmpty = profile?.status !== "approved"
     ? "Your application must be approved before open missions appear."
-    : !scoutConnectReady(profile, stripeLivemode)
+    : !payoutReady
       ? "Finish Stripe payout setup before open missions appear."
     : unmatchedOpenCount
       ? unmatchedMissionCopy(unmatchedOpenCount, hiddenReasons)
       : "There are no matching open missions right now.";
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Scout";
   return <ScoutDashboardShell active="missions" name={name}><PageTitle title="Mission board" text="Review active work and open opportunities in your service area." />
+    {!payoutReady && <ScoutPayoutRequiredBanner applicationApproved={profile?.status === "approved"} />}
     <MissionSection title="Your active missions" empty="You do not have an active mission right now." rows={active} />
     <MissionSection title="Open missions" empty={openEmpty} rows={open} emptyAction={unmatchedOpenCount ? { href: "/dashboard/scout/settings", label: "Review profile settings" } : undefined} />
   </ScoutDashboardShell>;
