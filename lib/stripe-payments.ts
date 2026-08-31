@@ -259,7 +259,8 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
   if (!stripeChargeId) throw new Error(`PaymentIntent ${intent.id} does not have a source Charge.`);
 
   const now = new Date();
-  const preferredUntil = row.mission.preferredScoutId
+  const hasPreferredScout = row.mission.preferredScoutId !== null;
+  const preferredUntil = hasPreferredScout
     ? new Date(now.getTime() + 60 * 60 * 1000)
     : null;
   const lifecycleBundleId = row.payment.bundleId ?? row.mission.bundleId;
@@ -450,9 +451,9 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
     ), audited AS (
       INSERT INTO mission_updates (mission_id, author_id, status, message)
       SELECT published_root.id, ${row.payment.customerId}, 'open'::mission_status,
-        CASE WHEN ${row.mission.preferredScoutId} IS NULL
-          THEN 'Payment received. Mission published to eligible Scouts.'
-          ELSE 'Payment received. Mission offered to the preferred Scout first.'
+        CASE WHEN ${hasPreferredScout}
+          THEN 'Payment received. Mission offered to the preferred Scout first.'
+          ELSE 'Payment received. Mission published to eligible Scouts.'
         END
       FROM published_root
       RETURNING mission_id
@@ -464,8 +465,16 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
       (SELECT COUNT(*)::integer FROM marked_bundle) AS bundle_count,
       (SELECT COUNT(*)::integer FROM audited) AS audit_count,
       (SELECT COUNT(*)::integer FROM paid_payment WHERE failure_code = ${LATE_PAYMENT_REFUND_CODE}) AS late_refund_count
-  `) as unknown as Array<{ paid_count: number; published_count: number; child_count: number; bundle_count: number; audit_count: number; late_refund_count: number }>;
-  if (Number(result[0]?.paid_count ?? 0) !== 1) {
+  `);
+  const summary = result.rows[0] as {
+    paid_count: number;
+    published_count: number;
+    child_count: number;
+    bundle_count: number;
+    audit_count: number;
+    late_refund_count: number;
+  } | undefined;
+  if (Number(summary?.paid_count ?? 0) !== 1) {
     const [current] = await db.select().from(payments).where(eq(payments.id, row.payment.id)).limit(1);
     const sameProviderIdentity = current?.stripePaymentIntentId === intent.id
       && current.stripeChargeId === stripeChargeId
@@ -510,9 +519,9 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
       return { paymentId: duplicate.id, missionId: row.mission.id, published: false, addon: null, duplicateRefundRequired: true };
     }
   }
-  const published = Number(result[0]?.published_count ?? 0) === 1;
+  const published = Number(summary?.published_count ?? 0) === 1;
   if (published) await alertEligibleScouts(row.mission.id);
-  if (Number(result[0]?.late_refund_count ?? 0) === 1) {
+  if (Number(summary?.late_refund_count ?? 0) === 1) {
     await refundLatePaymentBestEffort(row.payment.id, "payment_success");
   }
   const addon = await applyPaidAddonPayment(row.payment.id);

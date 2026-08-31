@@ -20,6 +20,17 @@ test("only a first success that is already ineligible receives the late-refund m
   assert.match(paymentService, /WHEN candidate\.kind = 'tip'/);
 });
 
+test("successful payment audit binds a typed preferred-scout boolean", () => {
+  assert.match(paymentService, /const hasPreferredScout = row\.mission\.preferredScoutId !== null;/);
+  assert.match(paymentService, /CASE WHEN \$\{hasPreferredScout\}/);
+  assert.doesNotMatch(paymentService, /CASE WHEN \$\{row\.mission\.preferredScoutId\} IS NULL/);
+});
+
+test("successful payment reads raw Neon results from the rows collection", () => {
+  assert.match(paymentService, /const summary = result\.rows\[0\]/);
+  assert.doesNotMatch(paymentService, /result\[0\]\?\.(?:paid_count|published_count|late_refund_count)/);
+});
+
 test("an ineligible booking is not published or propagated to bundle legs", () => {
   assert.match(paymentService, /published_root[\s\S]*COALESCE\(\(SELECT eligible FROM payment_eligibility\), FALSE\)/);
   assert.match(paymentService, /marked_children[\s\S]*EXISTS \(SELECT 1 FROM published_root\)/);
