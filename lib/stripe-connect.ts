@@ -13,6 +13,11 @@ export type StripeConnectSummary = {
   livemode: boolean;
 };
 
+export type StripeVerifiedIdentity = {
+  fullName: string;
+  reference: string;
+};
+
 type UnknownRecord = Record<string, unknown>;
 
 function record(value: unknown): UnknownRecord {
@@ -25,6 +30,55 @@ function stringArray(value: unknown) {
 
 function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function verifiedName(givenName: unknown, surname: unknown) {
+  if (typeof givenName !== "string" || typeof surname !== "string") return null;
+  const fullName = `${givenName.trim()} ${surname.trim()}`.trim();
+  return givenName.trim() && surname.trim() ? fullName : null;
+}
+
+/**
+ * V1 exposes an explicit verification state for an individual or company
+ * representative. Never infer identity clearance from account creation alone.
+ */
+export function verifiedIdentityFromV1Account(accountValue: unknown, representativeValue?: unknown): StripeVerifiedIdentity | null {
+  const account = record(accountValue);
+  const individual = record(account.individual);
+  const representative = record(representativeValue);
+  const person = account.business_type === "company" ? representative : individual;
+  const relationship = record(person.relationship);
+  if (account.business_type === "company" && relationship.representative !== true) return null;
+  if (record(person.verification).status !== "verified") return null;
+  const fullName = verifiedName(person.first_name, person.last_name);
+  if (!fullName) return null;
+  const reference = typeof person.id === "string" ? person.id : typeof account.id === "string" ? account.id : "";
+  return reference ? { fullName, reference } : null;
+}
+
+/**
+ * Accounts v2 represents verification through requirements and capability
+ * state rather than a Person.verification.status field. Identity is trusted
+ * only after the complete recipient account is ready and no verification is
+ * pending. Company accounts use their primary representative.
+ */
+export function verifiedIdentityFromV2Account(
+  accountValue: unknown,
+  accountReady: boolean,
+  representativeValue?: unknown,
+): StripeVerifiedIdentity | null {
+  if (!accountReady) return null;
+  const account = record(accountValue);
+  const identity = record(account.identity);
+  const individual = record(identity.individual);
+  const representative = record(representativeValue);
+  const person = identity.entity_type === "individual" ? individual : representative;
+  const relationship = record(person.relationship);
+  if (identity.entity_type !== "individual" && relationship.representative !== true) return null;
+  const fullName = verifiedName(person.given_name, person.surname);
+  if (!fullName) return null;
+  const reference = typeof person.id === "string" ? person.id : typeof account.id === "string" ? account.id : "";
+  return reference ? { fullName, reference } : null;
 }
 
 function capabilityStatus(value: unknown) {
@@ -153,6 +207,8 @@ export function scoutConnectReady(profile: {
   stripeTransfersActive?: boolean | null;
   payoutsEnabled?: boolean | null;
   stripePayoutScheduleConfiguredAt?: Date | null;
+  stripeSyncGeneration: number;
+  stripeSyncCompletedGeneration: number;
 }, expectedLivemode: boolean) {
   return Boolean(
     profile.stripeAccountId
@@ -160,7 +216,8 @@ export function scoutConnectReady(profile: {
     && profile.stripeConnectStatus === "ready"
     && profile.stripeTransfersActive
     && profile.payoutsEnabled
-    && profile.stripePayoutScheduleConfiguredAt,
+    && profile.stripePayoutScheduleConfiguredAt
+    && profile.stripeSyncCompletedGeneration === profile.stripeSyncGeneration,
   );
 }
 

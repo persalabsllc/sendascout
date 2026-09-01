@@ -88,24 +88,37 @@ const readyScout: ScoutApprovalInput = {
   lastName: "Scout",
   phone: "252-555-0100",
   legalVersion: "current",
+  legalAcceptedAt: new Date(),
   handbookVersion: SCOUT_HANDBOOK_VERSION,
   handbookAcceptedAt: new Date(),
   identityCheck: "clear",
+  identityProvider: "stripe_connect_v2",
+  identityVerificationReference: "person_test_scout",
   identityVerifiedName: "Kyle Scout",
   identityVerifiedAt: new Date(),
+  identityVerifiedBy: null,
   headshotPath: "scout-headshots/upload/kyle.webp",
   homeZip: "28562",
+  serviceRadiusMiles: 25,
   vehicleType: "Car",
   canSee: true,
   canMove: true,
   canMeet: true,
   verificationConsentedAt: new Date(),
   stripeAccountId: "acct_test_scout",
+  stripeAccountApiVersion: "v2",
   stripeAccountLivemode: false,
   stripeConnectStatus: "ready",
+  stripeDetailsSubmitted: true,
   stripeTransfersActive: true,
   payoutsEnabled: true,
+  stripeRequirementsCurrentlyDue: [],
+  stripeRequirementsPastDue: [],
+  stripeRequirementsPendingVerification: [],
+  stripeOnboardingCompletedAt: new Date(),
   stripePayoutScheduleConfiguredAt: new Date(),
+  stripeSyncGeneration: 0,
+  stripeSyncCompletedGeneration: 0,
 };
 
 test("Scout approval requires every trust and profile check", () => {
@@ -152,10 +165,17 @@ test("Stripe Connect readiness requires the current Stripe mode", () => {
   assert.equal(scoutConnectReady(readyScout, false), true);
   assert.equal(scoutConnectReady(readyScout, true), false);
   assert.equal(scoutConnectReady({ ...readyScout, stripeAccountLivemode: null }, false), false);
+  assert.equal(scoutConnectReady({ ...readyScout, stripeSyncGeneration: 1 }, false), false);
 });
 
 test("a fake or incomplete profile cannot pass approval", () => {
   const incomplete = { ...readyScout, firstName: "", lastName: null, phone: "555", homeZip: "ABCDE", vehicleType: "", canSee: false, canMove: false, canMeet: false, verificationConsentedAt: null };
   assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
   assert.ok(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).length >= 6);
+});
+
+test("Scout approval requires a supported service radius", () => {
+  const incomplete = { ...readyScout, serviceRadiusMiles: 40 };
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["zone"]);
 });

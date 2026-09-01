@@ -24,6 +24,8 @@ import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pri
 import { hashDeliveryPin, normalizeDeliveryPin } from "@/lib/delivery-pin";
 import { calculateBundlePricing, calculateDiscountedMissionPrice, nextRecurrenceDate } from "@/lib/mission-features";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { tryAutoApproveScout } from "@/lib/scout-auto-approval";
+import { scoutClaimReadinessConditions } from "@/lib/scout-claim-readiness";
 import { SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 import { localDateTimeToUtc } from "@/lib/time";
 import { isMissionTimeZone, normalizeMissionTimeZone } from "@/lib/us-time-zones";
@@ -653,13 +655,13 @@ async function validatePreferredScout(db: ReturnType<typeof getDb>, customerId: 
   const scoutId = input.preferredScoutId.trim();
   if (!scoutId) return null;
   if (!UUID_PATTERN.test(scoutId)) throw new Error("The preferred Scout selection is invalid.");
-  const [[profile], [saved], [completed]] = await Promise.all([
-    db.select().from(scoutProfiles).where(and(
-      eq(scoutProfiles.userId, scoutId),
-      eq(scoutProfiles.status, "approved"),
-      eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
-      isNotNull(scoutProfiles.handbookAcceptedAt),
-    )).limit(1),
+  const [profile, [saved], [completed]] = await Promise.all([
+    db.select({ profile: scoutProfiles }).from(scoutProfiles)
+      .innerJoin(users, eq(users.id, scoutProfiles.userId))
+      .where(and(
+        eq(scoutProfiles.userId, scoutId),
+        ...scoutClaimReadinessConditions(getStripeLivemode()),
+      )).limit(1).then((rows) => rows[0]?.profile),
     db.select({ id: customerPreferredScouts.id }).from(customerPreferredScouts).where(and(eq(customerPreferredScouts.customerId, customerId), eq(customerPreferredScouts.scoutId, scoutId))).limit(1),
     db.select({ id: missions.id }).from(missions).where(and(eq(missions.customerId, customerId), eq(missions.scoutId, scoutId), eq(missions.status, "completed"))).limit(1),
   ]);
@@ -689,11 +691,13 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
     if (!input.handbookAccepted) throw new Error("You must review and acknowledge the Scout Handbook before joining.");
     if (!input.canSee && !input.canMove && !input.canMeet) throw new Error("Select at least one mission type.");
     if (!/^\d{5}(?:-\d{4})?$/.test(input.homeZip.trim())) throw new Error("Enter a valid ZIP code.");
+    if (![10, 25, 50, 75].includes(input.radius)) throw new Error("Choose a valid travel radius.");
 
     const user = await requireAppUser("scout");
     const requestHeaders = await headers();
     const db = getDb();
     const now = new Date();
+    const homeZip = input.homeZip.trim().slice(0, 5);
     const [, profileRows] = await db.batch([
       db.update(users).set({
         role: "scout",
@@ -706,7 +710,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
       }).where(eq(users.id, user.id)),
       db.insert(scoutProfiles).values({
         userId: user.id,
-        homeZip: input.homeZip.trim(),
+        homeZip,
         serviceRadiusMiles: input.radius,
         vehicleType: input.vehicleType,
         experience: input.experience.trim() || null,
@@ -720,7 +724,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
       .onConflictDoUpdate({
         target: scoutProfiles.userId,
         set: {
-          homeZip: input.homeZip.trim(),
+          homeZip,
           serviceRadiusMiles: input.radius,
           vehicleType: input.vehicleType,
           experience: input.experience.trim() || null,
@@ -744,6 +748,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
     ]);
     const [profile] = profileRows;
     if (!profile) throw new Error("We could not save your Scout profile.");
+    await tryAutoApproveScout(user.id);
 
     return { ok: true, id: profile.id, scoutUserId: user.id };
   } catch (error) {

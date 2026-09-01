@@ -37,6 +37,17 @@ export async function processConnectedStripeEvent(event: StripeWebhookEvent) {
       }
       return "processed";
     }
+    if (v2AccountLinkOrPersonEvent(type)) {
+      if (!isStripeV2Event(event)) return "ignored";
+      const accountId = await v2ParentAccountId(event);
+      if (!accountId) throw new Error(`Stripe event ${event.id} did not identify its parent account.`);
+      const profile = await syncStripeAccountById(accountId);
+      if (profile && scoutConnectReady(profile, getStripeLivemode())) {
+        await reconcileCasePayouts();
+        await reconcileCompletedMissionSettlements({ scoutId: profile.userId });
+      }
+      return "processed";
+    }
     if (["payout.created", "payout.updated", "payout.paid", "payout.failed", "payout.canceled"].includes(type)) {
       if (isStripeV2Event(event)) return "ignored";
       const accountId = connectedAccountId(event);
@@ -59,6 +70,20 @@ function v2AccountStateEvent(type: string) {
     || type.startsWith("v2.core.account[requirements].")
     || type.startsWith("v2.core.account[future_requirements].")
     || type.startsWith("v2.core.account[identity].");
+}
+
+function v2AccountLinkOrPersonEvent(type: string) {
+  return type === "v2.core.account_link.returned"
+    || type === "v2.core.account_person.created"
+    || type === "v2.core.account_person.updated"
+    || type === "v2.core.account_person.deleted";
+}
+
+async function v2ParentAccountId(event: Stripe.V2.Core.EventNotification) {
+  const fullEvent = await event.fetchEvent() as { data?: { account_id?: unknown } };
+  return typeof fullEvent.data?.account_id === "string" && fullEvent.data.account_id
+    ? fullEvent.data.account_id
+    : null;
 }
 
 async function recordConnectedPayout(accountId: string, payout: Stripe.Payout) {

@@ -25,16 +25,24 @@ import {
 } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
 import { reportException } from "@/lib/observability";
-import { alertEligibleScouts, alertScoutToOpenMissions, notifyUser } from "@/lib/notifications";
+import {
+  alertEligibleScouts,
+  alertScoutToOpenMissions,
+  missionClaimedNotificationInput,
+  notificationChannelDedupeKey,
+  notifyUser,
+  notifyUserOnce,
+} from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
 import { ENHANCED_REPORT_CUSTOMER_CENTS, ENHANCED_REPORT_SCOUT_CENTS } from "@/lib/mission-pricing-core";
 import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-verification";
 import { formatDateTime } from "@/lib/time";
-import { scoutApprovalChecklist } from "@/lib/scout-approval";
+import { scoutApprovalChecklist, scoutReadyForApproval } from "@/lib/scout-approval";
+import { ensureScoutApprovalNotification } from "@/lib/scout-auto-approval";
+import { scoutProfileClaimReadinessConditions } from "@/lib/scout-claim-readiness";
 import { LEGAL_VERSION } from "@/lib/legal";
 import { SCOUT_HANDBOOK_VERSION, hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
-import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 import { cancelUncollectedBookingCheckout } from "@/lib/stripe-payments";
 import { settleMissionBestEffort } from "@/lib/stripe-settlement";
@@ -170,16 +178,27 @@ async function acceptedChangeOrderTotals(missionId: string) {
 export async function claimMission(id: string): Promise<Result> {
   try {
     const user = await requireAppUser("scout");
+    if (user.role !== "scout" || user.status !== "active") throw new Error("Only an active Scout account can claim missions.");
     const db = getDb();
     const [profile] = await db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
-    if (!profile || profile.status !== "approved" || profile.identityCheck !== "clear" || !profile.identityVerifiedName?.trim() || !profile.identityVerifiedAt) {
+    if (!profile || profile.status !== "approved") {
       throw new Error("Your Scout account and verified identity must be approved before claiming missions.");
     }
     if (!hasCurrentScoutHandbookAcceptance(profile)) {
       throw new Error("Review and acknowledge the current Scout Handbook before claiming missions.");
     }
+    if (!profile.verificationConsentedAt) throw new Error("Complete the Scout verification consent before claiming missions.");
     const stripeLivemode = getStripeLivemode();
-    if (!scoutConnectReady(profile, stripeLivemode)) throw new Error("Finish Stripe payout setup before claiming missions.");
+    if (!scoutReadyForApproval({
+      ...profile,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      phone: user.phone,
+      legalVersion: user.legalVersion,
+      legalAcceptedAt: user.legalAcceptedAt,
+    }, LEGAL_VERSION, stripeLivemode)) {
+      throw new Error("Finish every Scout onboarding and Stripe payout requirement before claiming missions.");
+    }
     const mission = await getMission(id);
     if (mission.customerId === user.id) throw new Error("You cannot claim a mission created by your own account.");
     const bundleContext = await getBundleContext(mission);
@@ -199,6 +218,12 @@ export async function claimMission(id: string): Promise<Result> {
       && (!candidate.preferredScoutExclusiveUntil || candidate.preferredScoutExclusiveUntil.getTime() > now.getTime()),
     ));
     if (firstLookActive) throw new Error("This mission is currently in another Scout’s private first-look window.");
+    const claimNotification = missionClaimedNotificationInput({
+      customerUserId: mission.customerId,
+      missionId: id,
+      bundleLegCount: bundleContext?.legs.length,
+    });
+    const claimNotificationDedupeKey = notificationChannelDedupeKey(claimNotification, "in_app");
     if (bundleContext) {
       if (mission.bundleSequence !== bundleContext.bundle.activeSequence || mission.status !== "open") {
         throw new Error("Only the active first part of this mission bundle can be claimed.");
@@ -206,15 +231,37 @@ export async function claimMission(id: string): Promise<Result> {
       let claimedBundle: { id: string } | undefined;
       try {
         const claimedBundleResult = await db.execute<{ id: string }>(sql`
-        WITH locked_profile AS MATERIALIZED (
+        WITH locked_user AS MATERIALIZED (
+          SELECT claim_user.id
+          FROM users AS claim_user
+          WHERE claim_user.id = ${user.id}
+            AND claim_user.role = 'scout'
+            AND claim_user.status = 'active'
+            AND claim_user.legal_version = ${LEGAL_VERSION}
+            AND claim_user.legal_accepted_at IS NOT NULL
+            AND btrim(COALESCE(claim_user.first_name, '')) <> ''
+            AND btrim(COALESCE(claim_user.last_name, '')) <> ''
+            AND length(regexp_replace(COALESCE(claim_user.phone, ''), '\\D', '', 'g')) >= 10
+          FOR UPDATE
+        ), locked_profile AS MATERIALIZED (
           UPDATE scout_profiles AS approved_profile
           SET updated_at = approved_profile.updated_at
           WHERE approved_profile.user_id = ${user.id}
             AND approved_profile.status = 'approved'
             AND approved_profile.identity_check = 'clear'
+            AND approved_profile.identity_provider IN ('stripe_connect_v1', 'stripe_connect_v2')
+            AND approved_profile.identity_verification_reference IS NOT NULL
+            AND btrim(approved_profile.identity_verification_reference) <> ''
+            AND approved_profile.identity_verified_by IS NULL
             AND approved_profile.identity_verified_name IS NOT NULL
+            AND btrim(approved_profile.identity_verified_name) <> ''
             AND approved_profile.identity_verified_at IS NOT NULL
+            AND approved_profile.verification_consented_at IS NOT NULL
             AND approved_profile.headshot_path IS NOT NULL
+            AND approved_profile.home_zip ~ '^[0-9]{5}$'
+            AND approved_profile.service_radius_miles IN (10, 25, 50, 75)
+            AND btrim(COALESCE(approved_profile.vehicle_type, '')) <> ''
+            AND (approved_profile.can_see OR approved_profile.can_move OR approved_profile.can_meet)
             AND approved_profile.handbook_version = ${SCOUT_HANDBOOK_VERSION}
             AND approved_profile.handbook_accepted_at IS NOT NULL
             AND approved_profile.home_zip IS NOT DISTINCT FROM ${profile.homeZip}
@@ -224,11 +271,23 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.can_move = ${profile.canMove}
             AND approved_profile.can_meet = ${profile.canMeet}
             AND approved_profile.stripe_account_id IS NOT NULL
+            AND approved_profile.stripe_account_api_version IS NOT NULL
+            AND (
+              (approved_profile.stripe_account_api_version = 'v1' AND approved_profile.identity_provider = 'stripe_connect_v1')
+              OR (approved_profile.stripe_account_api_version = 'v2' AND approved_profile.identity_provider = 'stripe_connect_v2')
+            )
             AND approved_profile.stripe_account_livemode = ${stripeLivemode}
+            AND approved_profile.stripe_sync_completed_generation = approved_profile.stripe_sync_generation
             AND approved_profile.stripe_connect_status = 'ready'
+            AND approved_profile.stripe_details_submitted = TRUE
             AND approved_profile.stripe_transfers_active = TRUE
             AND approved_profile.payouts_enabled = TRUE
+            AND approved_profile.stripe_onboarding_completed_at IS NOT NULL
             AND approved_profile.stripe_payout_schedule_configured_at IS NOT NULL
+            AND jsonb_array_length(approved_profile.stripe_requirements_currently_due) = 0
+            AND jsonb_array_length(approved_profile.stripe_requirements_past_due) = 0
+            AND jsonb_array_length(approved_profile.stripe_requirements_pending_verification) = 0
+            AND EXISTS (SELECT 1 FROM locked_user WHERE locked_user.id = approved_profile.user_id)
           RETURNING approved_profile.identity_verified_name, approved_profile.headshot_path, approved_profile.identity_verified_at
         ), target_bundle AS (
           SELECT id, active_sequence
@@ -285,13 +344,53 @@ export async function claimMission(id: string): Promise<Result> {
             AND (SELECT COUNT(*) FROM assigned) = (
               SELECT COUNT(*) FROM missions AS all_parts
               WHERE all_parts.bundle_id = bundle.id AND all_parts.archived_at IS NULL
-            )
+          )
           RETURNING bundle.id
+        ), audited AS (
+          INSERT INTO mission_updates (mission_id, author_id, status, message)
+          SELECT assigned.id, ${user.id}, 'claimed'::mission_status,
+            CASE
+              WHEN assigned.id = ${mission.id} THEN 'A Scout claimed the complete mission itinerary.'
+              ELSE 'This mission part was reserved for the assigned Scout.'
+            END
+          FROM assigned
+          WHERE EXISTS (SELECT 1 FROM claimed_bundle)
+          RETURNING mission_id
+        ), notification_checkpoint AS (
+          INSERT INTO notifications (
+            recipient_user_id, mission_id, channel, status, kind, dedupe_key,
+            title, body, action_label, action_url, sent_at
+          )
+          SELECT ${claimNotification.recipientUserId}, ${id},
+            'in_app'::notification_channel, 'sent'::notification_status,
+            ${claimNotification.kind}, ${claimNotificationDedupeKey},
+            ${claimNotification.title}, ${claimNotification.body},
+            ${claimNotification.actionLabel}, ${claimNotification.actionUrl}, ${now}
+          WHERE EXISTS (SELECT 1 FROM claimed_bundle)
+            AND (SELECT COUNT(*) FROM audited) = (SELECT COUNT(*) FROM assigned)
+          ON CONFLICT (dedupe_key) DO NOTHING
+          RETURNING dedupe_key
         )
         SELECT CASE
           WHEN (SELECT COUNT(*) FROM claimed_bundle) = 1
+            AND (SELECT COUNT(*) FROM audited) = (SELECT COUNT(*) FROM assigned)
+            AND (
+              EXISTS (
+                SELECT 1 FROM notification_checkpoint
+                WHERE notification_checkpoint.dedupe_key = ${claimNotificationDedupeKey}
+              )
+              OR EXISTS (
+                SELECT 1 FROM notifications AS existing_checkpoint
+                WHERE existing_checkpoint.dedupe_key = ${claimNotificationDedupeKey}
+                  AND existing_checkpoint.recipient_user_id = ${claimNotification.recipientUserId}
+                  AND existing_checkpoint.mission_id = ${id}
+                  AND existing_checkpoint.channel = 'in_app'
+                  AND existing_checkpoint.status = 'sent'
+                  AND existing_checkpoint.kind = ${claimNotification.kind}
+              )
+            )
           THEN (SELECT id::text FROM claimed_bundle)
-          ELSE (1 / ((SELECT COUNT(*)::integer FROM claimed_bundle) - (SELECT COUNT(*)::integer FROM claimed_bundle)))::text
+          ELSE (1 / ((SELECT COUNT(*)::integer FROM audited) - (SELECT COUNT(*)::integer FROM audited)))::text
         END AS id
         `);
         claimedBundle = claimedBundleResult.rows[0];
@@ -299,23 +398,39 @@ export async function claimMission(id: string): Promise<Result> {
         throw new Error("Another Scout claimed this mission first.");
       }
       if (!claimedBundle?.id) throw new Error("Another Scout claimed this mission first.");
-      await db.insert(missionUpdates).values(bundleContext.legs.map((leg) => ({
-        missionId: leg.id,
-        authorId: user.id,
-        status: "claimed" as const,
-        message: leg.id === mission.id ? "A Scout claimed the complete mission itinerary." : "This mission part was reserved for the assigned Scout.",
-      })));
     } else {
       const claimedResult = await db.execute<{ id: string }>(sql`
-        WITH locked_profile AS MATERIALIZED (
+        WITH locked_user AS MATERIALIZED (
+          SELECT claim_user.id
+          FROM users AS claim_user
+          WHERE claim_user.id = ${user.id}
+            AND claim_user.role = 'scout'
+            AND claim_user.status = 'active'
+            AND claim_user.legal_version = ${LEGAL_VERSION}
+            AND claim_user.legal_accepted_at IS NOT NULL
+            AND btrim(COALESCE(claim_user.first_name, '')) <> ''
+            AND btrim(COALESCE(claim_user.last_name, '')) <> ''
+            AND length(regexp_replace(COALESCE(claim_user.phone, ''), '\\D', '', 'g')) >= 10
+          FOR UPDATE
+        ), locked_profile AS MATERIALIZED (
           UPDATE scout_profiles AS approved_profile
           SET updated_at = approved_profile.updated_at
           WHERE approved_profile.user_id = ${user.id}
             AND approved_profile.status = 'approved'
             AND approved_profile.identity_check = 'clear'
+            AND approved_profile.identity_provider IN ('stripe_connect_v1', 'stripe_connect_v2')
+            AND approved_profile.identity_verification_reference IS NOT NULL
+            AND btrim(approved_profile.identity_verification_reference) <> ''
+            AND approved_profile.identity_verified_by IS NULL
             AND approved_profile.identity_verified_name IS NOT NULL
+            AND btrim(approved_profile.identity_verified_name) <> ''
             AND approved_profile.identity_verified_at IS NOT NULL
+            AND approved_profile.verification_consented_at IS NOT NULL
             AND approved_profile.headshot_path IS NOT NULL
+            AND approved_profile.home_zip ~ '^[0-9]{5}$'
+            AND approved_profile.service_radius_miles IN (10, 25, 50, 75)
+            AND btrim(COALESCE(approved_profile.vehicle_type, '')) <> ''
+            AND (approved_profile.can_see OR approved_profile.can_move OR approved_profile.can_meet)
             AND approved_profile.handbook_version = ${SCOUT_HANDBOOK_VERSION}
             AND approved_profile.handbook_accepted_at IS NOT NULL
             AND approved_profile.home_zip IS NOT DISTINCT FROM ${profile.homeZip}
@@ -325,11 +440,23 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.can_move = ${profile.canMove}
             AND approved_profile.can_meet = ${profile.canMeet}
             AND approved_profile.stripe_account_id IS NOT NULL
+            AND approved_profile.stripe_account_api_version IS NOT NULL
+            AND (
+              (approved_profile.stripe_account_api_version = 'v1' AND approved_profile.identity_provider = 'stripe_connect_v1')
+              OR (approved_profile.stripe_account_api_version = 'v2' AND approved_profile.identity_provider = 'stripe_connect_v2')
+            )
             AND approved_profile.stripe_account_livemode = ${stripeLivemode}
+            AND approved_profile.stripe_sync_completed_generation = approved_profile.stripe_sync_generation
             AND approved_profile.stripe_connect_status = 'ready'
+            AND approved_profile.stripe_details_submitted = TRUE
             AND approved_profile.stripe_transfers_active = TRUE
             AND approved_profile.payouts_enabled = TRUE
+            AND approved_profile.stripe_onboarding_completed_at IS NOT NULL
             AND approved_profile.stripe_payout_schedule_configured_at IS NOT NULL
+            AND jsonb_array_length(approved_profile.stripe_requirements_currently_due) = 0
+            AND jsonb_array_length(approved_profile.stripe_requirements_past_due) = 0
+            AND jsonb_array_length(approved_profile.stripe_requirements_pending_verification) = 0
+            AND EXISTS (SELECT 1 FROM locked_user WHERE locked_user.id = approved_profile.user_id)
           RETURNING approved_profile.identity_verified_name, approved_profile.headshot_path, approved_profile.identity_verified_at
         ), claimed_mission AS (
           UPDATE missions AS candidate
@@ -356,15 +483,61 @@ export async function claimMission(id: string): Promise<Result> {
               )
             )
           RETURNING candidate.id
+        ), audited AS (
+          INSERT INTO mission_updates (mission_id, author_id, status, message)
+          SELECT claimed_mission.id, ${user.id}, 'claimed'::mission_status, 'A Scout claimed this mission.'
+          FROM claimed_mission
+          RETURNING mission_id
+        ), notification_checkpoint AS (
+          INSERT INTO notifications (
+            recipient_user_id, mission_id, channel, status, kind, dedupe_key,
+            title, body, action_label, action_url, sent_at
+          )
+          SELECT ${claimNotification.recipientUserId}, ${id},
+            'in_app'::notification_channel, 'sent'::notification_status,
+            ${claimNotification.kind}, ${claimNotificationDedupeKey},
+            ${claimNotification.title}, ${claimNotification.body},
+            ${claimNotification.actionLabel}, ${claimNotification.actionUrl}, ${now}
+          WHERE EXISTS (SELECT 1 FROM audited)
+          ON CONFLICT (dedupe_key) DO NOTHING
+          RETURNING dedupe_key
         )
-        SELECT id::text FROM claimed_mission
+        SELECT claimed_mission.id::text
+        FROM claimed_mission
+        WHERE (SELECT COUNT(*) FROM audited) = 1
+          AND (
+            EXISTS (
+              SELECT 1 FROM notification_checkpoint
+              WHERE notification_checkpoint.dedupe_key = ${claimNotificationDedupeKey}
+            )
+            OR EXISTS (
+              SELECT 1 FROM notifications AS existing_checkpoint
+              WHERE existing_checkpoint.dedupe_key = ${claimNotificationDedupeKey}
+                AND existing_checkpoint.recipient_user_id = ${claimNotification.recipientUserId}
+                AND existing_checkpoint.mission_id = ${id}
+                AND existing_checkpoint.channel = 'in_app'
+                AND existing_checkpoint.status = 'sent'
+                AND existing_checkpoint.kind = ${claimNotification.kind}
+            )
+          )
       `);
       if (!claimedResult.rows[0]?.id) throw new Error("The mission or your Scout approval changed in another window.");
-      await db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "claimed", message: "A Scout claimed this mission." });
     }
-    const claimedMission = await getMission(id);
-    await notifyUser({ recipientUserId: claimedMission.customerId, missionId: id, kind: "mission_claimed", title: "Your mission has a Scout", body: bundleContext ? `A Scout accepted all ${bundleContext.legs.length} parts of your mission. Open it to follow progress and send a private message.` : "A Scout accepted your mission. Open it to follow progress and send a private message.", actionLabel: "Track mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
-    refreshMission(id);
+
+    // The claim and its audit trail are authoritative at this point. Queue the
+    // customer notice through the durable, idempotent notification path, but
+    // never tell the Scout that a committed claim failed because a provider or
+    // cache refresh was temporarily unavailable.
+    try {
+      await notifyUserOnce(claimNotification);
+    } catch (error) {
+      await reportException(error, { route: "missions.claim_notification", missionId: id });
+    }
+    try {
+      refreshMission(id);
+    } catch (error) {
+      await reportException(error, { route: "missions.claim_revalidation", missionId: id });
+    }
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to claim this mission." };
@@ -1464,10 +1637,14 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
     await requireAdminUser();
     const [existing] = await getDb().select({
       identityCheck: scoutProfiles.identityCheck,
+      identityProvider: scoutProfiles.identityProvider,
+      identityVerificationReference: scoutProfiles.identityVerificationReference,
       identityVerifiedName: scoutProfiles.identityVerifiedName,
       identityVerifiedAt: scoutProfiles.identityVerifiedAt,
+      identityVerifiedBy: scoutProfiles.identityVerifiedBy,
       headshotPath: scoutProfiles.headshotPath,
       homeZip: scoutProfiles.homeZip,
+      serviceRadiusMiles: scoutProfiles.serviceRadiusMiles,
       vehicleType: scoutProfiles.vehicleType,
       canSee: scoutProfiles.canSee,
       canMove: scoutProfiles.canMove,
@@ -1476,28 +1653,65 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
       handbookVersion: scoutProfiles.handbookVersion,
       handbookAcceptedAt: scoutProfiles.handbookAcceptedAt,
       stripeAccountId: scoutProfiles.stripeAccountId,
+      stripeAccountApiVersion: scoutProfiles.stripeAccountApiVersion,
       stripeAccountLivemode: scoutProfiles.stripeAccountLivemode,
       stripeConnectStatus: scoutProfiles.stripeConnectStatus,
+      stripeDetailsSubmitted: scoutProfiles.stripeDetailsSubmitted,
       stripeTransfersActive: scoutProfiles.stripeTransfersActive,
       payoutsEnabled: scoutProfiles.payoutsEnabled,
+      stripeRequirementsCurrentlyDue: scoutProfiles.stripeRequirementsCurrentlyDue,
+      stripeRequirementsPastDue: scoutProfiles.stripeRequirementsPastDue,
+      stripeRequirementsPendingVerification: scoutProfiles.stripeRequirementsPendingVerification,
+      stripeOnboardingCompletedAt: scoutProfiles.stripeOnboardingCompletedAt,
       stripePayoutScheduleConfiguredAt: scoutProfiles.stripePayoutScheduleConfiguredAt,
+      stripeSyncGeneration: scoutProfiles.stripeSyncGeneration,
+      stripeSyncCompletedGeneration: scoutProfiles.stripeSyncCompletedGeneration,
       firstName: users.firstName,
       lastName: users.lastName,
       phone: users.phone,
       legalVersion: users.legalVersion,
+      legalAcceptedAt: users.legalAcceptedAt,
+      profileStatus: scoutProfiles.status,
     }).from(scoutProfiles).innerJoin(users, eq(users.id, scoutProfiles.userId)).where(eq(scoutProfiles.id, profileId)).limit(1);
     if (!existing) throw new Error("Scout profile not found.");
     if (status === "approved") {
+      if (existing.profileStatus !== "paused") throw new Error("Only a paused Scout can be restored manually. New applicants approve automatically when every requirement is complete.");
       const missing = scoutApprovalChecklist(existing, LEGAL_VERSION, getStripeLivemode()).filter((item) => !item.complete);
       if (missing.length) throw new Error(`Complete the approval checklist first: ${missing.map((item) => item.label).join(", ")}.`);
     }
-    const [profile] = await getDb().update(scoutProfiles).set({
-      status,
-      approvedAt: status === "approved" ? new Date() : null,
-      updatedAt: new Date(),
-    }).where(eq(scoutProfiles.id, profileId)).returning({ userId: scoutProfiles.userId });
+    const now = new Date();
+    const [profile] = status === "approved"
+      ? await getDb().update(scoutProfiles).set({
+        status: "approved",
+        approvedAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(scoutProfiles.id, profileId),
+        ...scoutProfileClaimReadinessConditions(getStripeLivemode(), ["paused"]),
+        sql`EXISTS (
+          SELECT 1
+          FROM ${users} AS restore_user
+          WHERE restore_user.id = ${scoutProfiles.userId}
+            AND restore_user.role = 'scout'
+            AND restore_user.status = 'active'
+            AND restore_user.legal_version = ${LEGAL_VERSION}
+            AND restore_user.legal_accepted_at IS NOT NULL
+            AND btrim(COALESCE(restore_user.first_name, '')) <> ''
+            AND btrim(COALESCE(restore_user.last_name, '')) <> ''
+            AND length(regexp_replace(COALESCE(restore_user.phone, ''), '\\D', '', 'g')) >= 10
+        )`,
+      )).returning({ userId: scoutProfiles.userId })
+      : await getDb().update(scoutProfiles).set({
+        status,
+        approvedAt: null,
+        updatedAt: now,
+      }).where(eq(scoutProfiles.id, profileId)).returning({ userId: scoutProfiles.userId });
+    if (status === "approved" && !profile) throw new Error("The Scout’s readiness changed before access could be restored. Refresh Stripe and the checklist, then try again.");
     if (profile && status === "approved") {
-      await notifyUser({ recipientUserId: profile.userId, kind: "scout_approved", title: "Your Scout application is approved", body: "You can now review and claim missions within your selected delivery zone.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
+      const approvalNotice = await ensureScoutApprovalNotification(profile.userId);
+      if (!approvalNotice.created && !approvalNotice.emailQueued) {
+        await notifyUser({ recipientUserId: profile.userId, kind: "scout_access_restored", title: "Your Scout access is restored", body: "You can once again review and claim missions within your selected service area.", actionLabel: "Browse missions", actionUrl: "https://sendascout.com/dashboard/scout/missions" });
+      }
       try {
         await alertScoutToOpenMissions(profile.userId);
       } catch (alertError) {
@@ -1511,31 +1725,6 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to update the Scout." };
-  }
-}
-
-export async function adminRecordScoutIdentity(profileId: string): Promise<Result> {
-  try {
-    const admin = await requireAdminUser();
-    const [profile] = await getDb().select({ id: scoutProfiles.id, userId: scoutProfiles.userId }).from(scoutProfiles).where(eq(scoutProfiles.id, profileId)).limit(1);
-    if (!profile) throw new Error("Scout profile not found.");
-    const [scout] = await getDb().select({ firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, profile.userId)).limit(1);
-    const verifiedName = [scout?.firstName, scout?.lastName].filter(Boolean).join(" ");
-    if (!verifiedName) throw new Error("Add the Scout’s legal name before recording identity verification.");
-    await getDb().update(scoutProfiles).set({
-      identityCheck: "clear",
-      identityProvider: "manual_admin_review",
-      identityVerificationReference: null,
-      identityVerifiedName: verifiedName,
-      identityVerifiedAt: new Date(),
-      identityVerifiedBy: admin.id,
-      updatedAt: new Date(),
-    }).where(eq(scoutProfiles.id, profileId));
-    revalidatePath("/control-room");
-    revalidatePath("/control-room/scouts");
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Unable to record identity verification." };
   }
 }
 
@@ -1645,6 +1834,10 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
             WITH updated_root AS (
               UPDATE missions AS root
               SET status = ${status}::mission_status,
+                  alert_generation = CASE
+                    WHEN ${status} = 'open' THEN root.alert_generation + 1
+                    ELSE root.alert_generation
+                  END,
                   customer_price_cents = ${customerPriceCents},
                   list_customer_price_cents = ${listCustomerPriceCents},
                   scout_payout_cents = ${scoutPayoutCents},
@@ -1696,7 +1889,10 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
           throw new Error("The mission bundle changed in another window. Refresh before trying again.");
         }
       } else {
-        const [updated] = await db.update(missions).set(rootChanges).where(and(
+        const [updated] = await db.update(missions).set({
+          ...rootChanges,
+          ...(status === "open" ? { alertGeneration: sql`${missions.alertGeneration} + 1` } : {}),
+        }).where(and(
           eq(missions.id, rootMission.id),
           eq(missions.status, expectedStatus),
           isNull(missions.archivedAt),
@@ -1704,7 +1900,13 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
         if (!updated) throw new Error("The mission changed in another window. Refresh before trying again.");
       }
 
-      await db.insert(missionUpdates).values({ missionId: rootMission.id, authorId: admin.id, status, message: status === "draft" ? "Control Room pulled this mission from the Scout board." : "Control Room reopened this mission to Scouts." });
+      await db.insert(missionUpdates).values({
+        missionId: rootMission.id,
+        authorId: admin.id,
+        status,
+        message: status === "draft" ? "Control Room pulled this mission from the Scout board." : "Control Room reopened this mission to Scouts.",
+        evidenceKind: status === "open" ? "mission_publication" : null,
+      });
       if (status === "draft") await db.update(notifications).set({ readAt: now }).where(and(eq(notifications.missionId, rootMission.id), eq(notifications.kind, "new_mission")));
       if (status === "open") await alertEligibleScouts(rootMission.id);
       refreshMission(rootMission.id);

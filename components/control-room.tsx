@@ -28,7 +28,7 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
   return <main className="control-page">
     <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room/analytics">Analytics</Link><Link href="/control-room/customers">Customers</Link><Link href="/control-room/scouts">Scouts</Link><Link href="/control-room/support">Support</Link><Link href="/">Public site</Link></div></header>
     <div className="control-shell">
-      <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Approve Scouts, release missions and oversee every active job.</p></div><div className="control-title-actions"><Link className="button button-small button-ghost" href="/control-room/support"><IconLifebuoy size={17} /> Customer support</Link><Link className="button button-small" href="/control-room/procedures"><IconBook2 size={17} /> Operations playbook</Link></div></div>
+      <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Monitor Scout onboarding, release missions and oversee every active job.</p></div><div className="control-title-actions"><Link className="button button-small button-ghost" href="/control-room/support"><IconLifebuoy size={17} /> Customer support</Link><Link className="button button-small" href="/control-room/procedures"><IconBook2 size={17} /> Operations playbook</Link></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="control-stats">
         <ControlStat alert={stats.newCustomers > 0} href="/control-room/customers" icon={IconUserPlus} label="New customers · 24h" value={stats.newCustomers} />
@@ -78,7 +78,7 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
         {messageNotifications.length ? <div className="control-table email-delivery-list">{messageNotifications.map((item) => <article key={item.id}>
           <div className="control-primary"><small>{item.channel.toUpperCase()}</small><strong>{item.title}</strong><span>{item.recipient} · {new Date(item.createdAt).toLocaleString()}</span><small>{messageDeliveryDetail(item)} · {item.attempts} attempt{item.attempts === 1 ? "" : "s"}</small></div>
           <span className={`status ${item.status === "failed" ? "warning-status" : ""}`}>{item.channel === "email" && item.providerAccepted ? "Accepted" : titleCase(item.status)}</span>
-          <div className="control-actions">{(item.channel === "email" || item.status !== "sent") && <button disabled={pending} onClick={() => run(() => adminRetryNotification(item.id))}><IconRefresh size={15} /> {item.channel === "email" && item.providerAccepted ? "Resend" : "Retry"}</button>}</div>
+          <div className="control-actions">{messageCanRetry(item) && <button disabled={pending} onClick={() => run(() => adminRetryNotification(item.id))}><IconRefresh size={15} /> {item.channel === "email" && item.providerAccepted ? "Resend" : "Retry"}</button>}</div>
         </article>)}</div> : <div className="control-empty">No email or text delivery records yet.</div>}
       </section>
     </div>
@@ -122,8 +122,16 @@ function messageDeliveryDetail(item: MessageRow) {
     const acceptedAt = item.lastAttemptAt ? ` ${new Date(item.lastAttemptAt).toLocaleString()}` : "";
     return `Accepted by email provider${acceptedAt}; delivery is not independently confirmed`;
   }
+  if (item.channel === "sms" && item.providerAccepted && item.status === "pending") return "Accepted by text provider; awaiting delivery confirmation";
   if (item.sentAt) return `Delivered ${new Date(item.sentAt).toLocaleString()}`;
   return "Awaiting provider result";
+}
+
+function messageCanRetry(item: MessageRow) {
+  if (item.error?.startsWith("Provider outcome is unknown")) return false;
+  if (item.channel === "email") return true;
+  if (item.channel !== "sms" || item.status === "sent") return false;
+  return item.status === "failed" || !item.providerAccepted;
 }
 
 function ControlStat({ icon: Icon, label, value, href, alert = false }: { icon: typeof IconUsers; label: string; value: number; href?: string; alert?: boolean }) {

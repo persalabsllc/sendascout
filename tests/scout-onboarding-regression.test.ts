@@ -24,6 +24,8 @@ test("an interrupted post-application photo upload has a recovery route", () => 
 test("approval backfills deduplicated alerts for currently open eligible missions", () => {
   assert.match(missionActions, /alertScoutToOpenMissions\(profile\.userId\)/);
   assert.match(notifications, /eq\(missions\.status, "open"\)/);
-  assert.match(notifications, /alreadyAlerted\.has\(mission\.id\)/);
+  assert.match(notifications, /const target = missionAlertTarget\(mission, scoutUserId\)/);
+  assert.match(notifications, /dedupeScope: target\.scope/);
+  assert.match(notifications, /onConflictDoNothing\(\{ target: notifications\.dedupeKey \}\)/);
   assert.match(notifications, /isMissionEligibleForScout\(leg, scout\)/);
 });

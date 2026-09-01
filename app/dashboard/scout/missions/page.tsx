@@ -24,7 +24,7 @@ export default async function ScoutMissionsPage() {
   const stripeLivemode = getStripeLivemode();
   const payoutReady = scoutConnectReady(profile, stripeLivemode);
   const handbookAccepted = hasCurrentScoutHandbookAcceptance(profile);
-  const canBrowseOpen = scoutCanBrowseOpenMissions(profile);
+  const canBrowseOpen = scoutCanBrowseOpenMissions(user, profile);
   const rows = await db.select().from(missions).where(and(
     isNull(missions.archivedAt),
     canBrowseOpen ? or(

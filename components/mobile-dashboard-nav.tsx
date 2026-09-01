@@ -42,6 +42,7 @@ export function MobileDashboardNav({ role, name, initials }: MobileDashboardNavP
         { href: "/dashboard/scout/handbook", label: "Scout Handbook", icon: IconBook2 },
         { href: "/dashboard/scout/earnings", label: "Earnings & payouts", icon: IconWallet },
         { href: "/dashboard/scout/settings", label: "Profile & settings", icon: IconSettings },
+        { href: "mailto:support@sendascout.com?subject=Scout%20support", label: "Contact Support", icon: IconLifebuoy },
         { href: "/dashboard/notifications", label: "Notifications", icon: IconBell },
       ]
     : [

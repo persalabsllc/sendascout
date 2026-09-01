@@ -27,6 +27,7 @@ const missionPage = source("app/dashboard/missions/[id]/page.tsx");
 const missionMap = source("app/api/mission-map/route.ts");
 const missionActions = source("app/actions/missions.ts");
 const notifications = source("lib/notifications.ts");
+const claimReadiness = source("lib/scout-claim-readiness.ts");
 const notificationCenter = source("app/dashboard/notifications/page.tsx");
 const preferredScoutRequest = source("app/request/page.tsx");
 
@@ -92,12 +93,12 @@ test("the handbook stays accessible from every Scout dashboard navigation", () =
 test("overview and Mission Board expose matching open missions while the handbook gates claiming", () => {
   for (const page of [scoutOverview, missionBoard]) {
     assert.match(page, /hasCurrentScoutHandbookAcceptance\(profile\)/);
-    assert.match(page, /scoutCanBrowseOpenMissions\(profile\)/);
+    assert.match(page, /scoutCanBrowseOpenMissions\(user, profile\)/);
     assert.match(page, /eq\(missions\.scoutId, user\.id\)/);
     assert.match(page, /eq\(missions\.status, "open"\)/);
   }
   assert.match(scoutOverview, /scoutHandbookAccepted=\{handbookAccepted\}/);
-  assert.match(desktopDashboard, /canBrowseOpen && !scoutHandbookAccepted && <ScoutHandbookRequiredBanner/);
+  assert.match(desktopDashboard, /scoutOnboardingProgress && <ScoutOnboardingProgressTracker/);
   assert.match(missionBoard, /ScoutHandbookRequiredBanner/);
   assert.doesNotMatch(missionBoard, /before open missions appear/i);
   assert.match(missionBoard, /Browse matching opportunities while you finish onboarding/);
@@ -107,14 +108,14 @@ test("overview and Mission Board expose matching open missions while the handboo
 test("direct mission and approximate map allow browse-only Scouts while preserving claim gates", () => {
   const assignedMissionBranch = missionPage.indexOf("mission.scoutId === user.id");
   const openMissionBranch = missionPage.indexOf('mission.status === "open"');
-  const browseMissionGate = missionPage.indexOf("scoutCanBrowseOpenMissions(profile)");
+  const browseMissionGate = missionPage.indexOf("scoutCanBrowseOpenMissions(user, profile)");
   assert.ok(assignedMissionBranch >= 0 && assignedMissionBranch < openMissionBranch && openMissionBranch < browseMissionGate);
   assert.match(missionPage, /canClaim = profile\.status === "approved"[\s\S]*scoutReadyForApproval\(\{ \.\.\.profile, \.\.\.user \}, LEGAL_VERSION, getStripeLivemode\(\)\)/);
   assert.doesNotMatch(missionPage, /redirect\(`\/dashboard\/scout\/handbook/);
 
   const assignedMapAccess = missionMap.indexOf("mission.scoutId === user.id");
   const openMapBranch = missionMap.indexOf('mission.status === "open"');
-  const browseMapGate = missionMap.indexOf("scoutCanBrowseOpenMissions(profile)");
+  const browseMapGate = missionMap.indexOf("scoutCanBrowseOpenMissions(user, profile)");
   assert.ok(assignedMapAccess >= 0 && assignedMapAccess < openMapBranch && openMapBranch < browseMapGate);
   assert.doesNotMatch(missionMap, /hasCurrentScoutHandbookAcceptance|scoutConnectReady/);
   assert.match(missionMap, /planningPrecision = profile\?\.status === "approved" \? 3 : 2/);
@@ -136,19 +137,18 @@ test("claiming has both an application precheck and handbook checks inside both 
 });
 
 test("new mission alerts and preferred Scout options require the current handbook", () => {
-  assert.equal((notifications.match(/eq\(scoutProfiles\.handbookVersion, SCOUT_HANDBOOK_VERSION\)/g) ?? []).length, 2);
-  assert.equal((notifications.match(/isNotNull\(scoutProfiles\.handbookAcceptedAt\)/g) ?? []).length, 2);
+  assert.ok((notifications.match(/scoutClaimReadinessConditions\(stripeLivemode\)/g) ?? []).length >= 2);
+  assert.match(claimReadiness, /eq\(scoutProfiles\.handbookVersion, SCOUT_HANDBOOK_VERSION\)/);
+  assert.match(claimReadiness, /isNotNull\(scoutProfiles\.handbookAcceptedAt\)/);
   assert.match(handbookAction, /await alertScoutToOpenMissions\(user\.id\)/);
 
-  assert.ok((preferredScoutRequest.match(/eq\(scoutProfiles\.handbookVersion, SCOUT_HANDBOOK_VERSION\)/g) ?? []).length >= 2);
-  assert.ok((preferredScoutRequest.match(/isNotNull\(scoutProfiles\.handbookAcceptedAt\)/g) ?? []).length >= 2);
-  assert.match(onboardingAction, /eq\(scoutProfiles\.handbookVersion, SCOUT_HANDBOOK_VERSION\)/);
-  assert.match(onboardingAction, /isNotNull\(scoutProfiles\.handbookAcceptedAt\)/);
+  assert.match(preferredScoutRequest, /scoutClaimReadinessConditions\(getStripeLivemode\(\)\)/);
+  assert.match(onboardingAction, /scoutClaimReadinessConditions\(getStripeLivemode\(\)\)/);
 });
 
 test("historical open-mission notices stay hidden until the current handbook is accepted", () => {
   assert.match(notificationCenter, /hasCurrentScoutHandbookAcceptance\(scoutProfileRows\[0\]\)/);
-  assert.match(notificationCenter, /handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
+  assert.match(notificationCenter, /canBrowseOpen && handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
   assert.match(notificationCenter, /visibilityFilter/);
 });
 

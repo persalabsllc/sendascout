@@ -12,9 +12,13 @@ import {
   payments,
   paymentDisputes,
   paymentRefunds,
+  scoutProfiles,
   users,
 } from "@/db/schema";
 import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
+import { LEGAL_VERSION } from "@/lib/legal";
+import { SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
+import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { stripeDisputeIsClosed } from "@/lib/stripe-dispute-core";
 import { reconcileStripeDisputeMissionLifecycle } from "@/lib/stripe-dispute-lifecycle";
 import {
@@ -28,12 +32,93 @@ import { getAppUrl, getStripe, getStripeLivemode, stripeObjectId } from "@/lib/s
 type AppUser = typeof users.$inferSelect;
 type PaymentRecord = typeof payments.$inferSelect;
 
+type PreferredScoutPublicationSnapshot = {
+  eligible: boolean;
+  scoutId: string;
+  scout: {
+    homeZip: string | null;
+    serviceRadiusMiles: number;
+    vehicleType: string | null;
+    canSee: boolean;
+    canMove: boolean;
+    canMeet: boolean;
+  } | null;
+  legs: Array<{
+    id: string;
+    type: "see" | "move" | "meet";
+    zip: string;
+    largeItem: boolean;
+  }>;
+};
+
 const payableStatuses: PaymentRecord["status"][] = [
   "pending",
   "requires_action",
   "failed",
   "canceled",
 ];
+
+async function preferredScoutPublicationSnapshot(
+  db: ReturnType<typeof getDb>,
+  rootMissionId: string,
+  bundleId: string | null,
+): Promise<PreferredScoutPublicationSnapshot | null> {
+  const [root] = await db.select({ preferredScoutId: missions.preferredScoutId })
+    .from(missions)
+    .where(eq(missions.id, rootMissionId))
+    .limit(1);
+  if (!root?.preferredScoutId) return null;
+
+  const missionScope = bundleId
+    ? or(eq(missions.id, rootMissionId), eq(missions.bundleId, bundleId))
+    : eq(missions.id, rootMissionId);
+  const [legs, scoutRows] = await Promise.all([
+    db.select({
+      id: missions.id,
+      type: missions.type,
+      zip: missions.zip,
+      largeItem: missions.largeItem,
+    }).from(missions).where(missionScope).orderBy(asc(missions.id)),
+    db.select({
+      homeZip: scoutProfiles.homeZip,
+      serviceRadiusMiles: scoutProfiles.serviceRadiusMiles,
+      vehicleType: scoutProfiles.vehicleType,
+      canSee: scoutProfiles.canSee,
+      canMove: scoutProfiles.canMove,
+      canMeet: scoutProfiles.canMeet,
+    }).from(scoutProfiles).where(eq(scoutProfiles.userId, root.preferredScoutId)).limit(1),
+  ]);
+  const scout = scoutRows[0] ?? null;
+  return {
+    scoutId: root.preferredScoutId,
+    scout,
+    legs,
+    eligible: Boolean(scout && legs.length > 0 && legs.every((leg) => isMissionEligibleForScout(leg, scout))),
+  };
+}
+
+function preferredScoutPublicationMatchSql(snapshot: PreferredScoutPublicationSnapshot | null) {
+  if (!snapshot?.eligible || !snapshot.scout) return sql`FALSE`;
+  const legSnapshotChecks = snapshot.legs.map((leg) => sql`EXISTS (
+    SELECT 1
+    FROM locked_missions AS matching_leg
+    WHERE matching_leg.id = ${leg.id}
+      AND matching_leg.type = ${leg.type}
+      AND matching_leg.zip = ${leg.zip}
+      AND matching_leg.large_item = ${leg.largeItem}
+  )`);
+  return sql`
+    ready_profile.user_id = ${snapshot.scoutId}
+    AND ready_profile.home_zip IS NOT DISTINCT FROM ${snapshot.scout.homeZip}
+    AND ready_profile.service_radius_miles = ${snapshot.scout.serviceRadiusMiles}
+    AND ready_profile.vehicle_type IS NOT DISTINCT FROM ${snapshot.scout.vehicleType}
+    AND ready_profile.can_see = ${snapshot.scout.canSee}
+    AND ready_profile.can_move = ${snapshot.scout.canMove}
+    AND ready_profile.can_meet = ${snapshot.scout.canMeet}
+    AND (SELECT COUNT(*) FROM locked_missions) = ${snapshot.legs.length}
+    AND ${sql.join(legSnapshotChecks, sql` AND `)}
+  `;
+}
 
 export async function ensureStripeCustomer(user: AppUser) {
   const stripe = getStripe();
@@ -316,15 +401,17 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
   if (!stripeChargeId) throw new Error(`PaymentIntent ${intent.id} does not have a source Charge.`);
 
   const now = new Date();
-  const hasPreferredScout = row.mission.preferredScoutId !== null;
-  const preferredUntil = hasPreferredScout
-    ? new Date(now.getTime() + 60 * 60 * 1000)
-    : null;
+  const preferredUntil = new Date(now.getTime() + 60 * 60 * 1000);
   const lifecycleBundleId = row.payment.bundleId ?? row.mission.bundleId;
+  const preferredScoutSnapshot = row.payment.kind === "booking"
+    ? await preferredScoutPublicationSnapshot(db, row.mission.id, lifecycleBundleId)
+    : null;
+  const preferredScoutMissionMatch = preferredScoutPublicationMatchSql(preferredScoutSnapshot);
   const result = await db.execute(sql`
     WITH locked_missions AS MATERIALIZED (
       SELECT locked_mission.id, locked_mission.bundle_id, locked_mission.bundle_sequence,
-        locked_mission.status, locked_mission.archived_at
+        locked_mission.status, locked_mission.archived_at, locked_mission.preferred_scout_id,
+        locked_mission.type, locked_mission.zip, locked_mission.large_item
       FROM missions AS locked_mission
       WHERE locked_mission.id = ${row.mission.id}
         OR (
@@ -341,6 +428,56 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
         AND bundle_anchor.bundle_id = locked_parent.id
       WHERE locked_parent.id = ${lifecycleBundleId}
       FOR UPDATE OF locked_parent
+    ), preferred_scout_readiness AS MATERIALIZED (
+      SELECT ready_profile.user_id
+      FROM locked_missions AS preferred_root
+      INNER JOIN scout_profiles AS ready_profile
+        ON ready_profile.user_id = preferred_root.preferred_scout_id
+      INNER JOIN users AS ready_user
+        ON ready_user.id = ready_profile.user_id
+      WHERE preferred_root.id = ${row.mission.id}
+        AND ready_user.role = 'scout'
+        AND ready_user.status = 'active'
+        AND ready_user.legal_version = ${LEGAL_VERSION}
+        AND ready_user.legal_accepted_at IS NOT NULL
+        AND btrim(COALESCE(ready_user.first_name, '')) <> ''
+        AND btrim(COALESCE(ready_user.last_name, '')) <> ''
+        AND length(regexp_replace(COALESCE(ready_user.phone, ''), '\\D', '', 'g')) >= 10
+        AND ready_profile.status = 'approved'
+        AND ready_profile.identity_check = 'clear'
+        AND ready_profile.identity_provider IN ('stripe_connect_v1', 'stripe_connect_v2')
+        AND ready_profile.identity_verified_by IS NULL
+        AND ready_profile.identity_verification_reference IS NOT NULL
+        AND btrim(ready_profile.identity_verification_reference) <> ''
+        AND ready_profile.identity_verified_name IS NOT NULL
+        AND btrim(ready_profile.identity_verified_name) <> ''
+        AND ready_profile.identity_verified_at IS NOT NULL
+        AND ready_profile.headshot_path IS NOT NULL
+        AND ready_profile.home_zip ~ '^[0-9]{5}$'
+        AND ready_profile.service_radius_miles IN (10, 25, 50, 75)
+        AND btrim(COALESCE(ready_profile.vehicle_type, '')) <> ''
+        AND (ready_profile.can_see OR ready_profile.can_move OR ready_profile.can_meet)
+        AND ready_profile.handbook_version = ${SCOUT_HANDBOOK_VERSION}
+        AND ready_profile.handbook_accepted_at IS NOT NULL
+        AND ready_profile.verification_consented_at IS NOT NULL
+        AND ready_profile.stripe_account_id IS NOT NULL
+        AND ready_profile.stripe_account_api_version IS NOT NULL
+        AND (
+          (ready_profile.stripe_account_api_version = 'v1' AND ready_profile.identity_provider = 'stripe_connect_v1')
+          OR (ready_profile.stripe_account_api_version = 'v2' AND ready_profile.identity_provider = 'stripe_connect_v2')
+        )
+        AND ready_profile.stripe_account_livemode = ${intent.livemode}
+        AND ready_profile.stripe_sync_completed_generation = ready_profile.stripe_sync_generation
+        AND ready_profile.stripe_connect_status = 'ready'
+        AND ready_profile.stripe_details_submitted = TRUE
+        AND ready_profile.stripe_transfers_active = TRUE
+        AND ready_profile.payouts_enabled = TRUE
+        AND ready_profile.stripe_onboarding_completed_at IS NOT NULL
+        AND ready_profile.stripe_payout_schedule_configured_at IS NOT NULL
+        AND jsonb_array_length(ready_profile.stripe_requirements_currently_due) = 0
+        AND jsonb_array_length(ready_profile.stripe_requirements_past_due) = 0
+        AND jsonb_array_length(ready_profile.stripe_requirements_pending_verification) = 0
+        AND ${preferredScoutMissionMatch}
     ), payment_eligibility AS MATERIALIZED (
       SELECT candidate.id,
         CASE
@@ -473,8 +610,21 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
       SET status = 'open',
           payment_status = 'paid',
           stripe_payment_intent_id = ${intent.id},
-          preferred_scout_exclusive_until = ${preferredUntil},
-          preferred_scout_broadcast_at = NULL,
+          alert_generation = root.alert_generation + 1,
+          preferred_scout_id = CASE
+            WHEN root.preferred_scout_id IS NULL OR EXISTS (SELECT 1 FROM preferred_scout_readiness)
+              THEN root.preferred_scout_id
+            ELSE NULL
+          END,
+          preferred_scout_exclusive_until = CASE
+            WHEN EXISTS (SELECT 1 FROM preferred_scout_readiness) THEN ${preferredUntil}
+            ELSE NULL
+          END,
+          preferred_scout_broadcast_at = CASE
+            WHEN root.preferred_scout_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM preferred_scout_readiness)
+              THEN ${now}
+            ELSE NULL
+          END,
           updated_at = ${now}
       WHERE root.id = ${row.mission.id}
         AND root.status = 'draft'
@@ -482,11 +632,15 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
         AND ${row.payment.kind} = 'booking'
         AND EXISTS (SELECT 1 FROM paid_payment)
         AND COALESCE((SELECT eligible FROM payment_eligibility), FALSE)
-      RETURNING root.id, root.bundle_id
+      RETURNING root.id, root.bundle_id, root.preferred_scout_id,
+        root.preferred_scout_exclusive_until, root.preferred_scout_broadcast_at
     ), marked_children AS (
       UPDATE missions AS child
       SET payment_status = 'paid',
           stripe_payment_intent_id = ${intent.id},
+          preferred_scout_id = (SELECT preferred_scout_id FROM published_root),
+          preferred_scout_exclusive_until = (SELECT preferred_scout_exclusive_until FROM published_root),
+          preferred_scout_broadcast_at = (SELECT preferred_scout_broadcast_at FROM published_root),
           updated_at = ${now}
       WHERE child.bundle_id = ${row.payment.bundleId}
         AND child.id <> ${row.mission.id}
@@ -506,12 +660,13 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
         AND EXISTS (SELECT 1 FROM published_root)
       RETURNING bundle.id
     ), audited AS (
-      INSERT INTO mission_updates (mission_id, author_id, status, message)
+      INSERT INTO mission_updates (mission_id, author_id, status, message, evidence_kind)
       SELECT published_root.id, ${row.payment.customerId}, 'open'::mission_status,
-        CASE WHEN ${hasPreferredScout}
+        CASE WHEN EXISTS (SELECT 1 FROM preferred_scout_readiness)
           THEN 'Payment received. Mission offered to the preferred Scout first.'
           ELSE 'Payment received. Mission published to eligible Scouts.'
-        END
+        END,
+        'mission_publication'
       FROM published_root
       RETURNING mission_id
     )

@@ -26,19 +26,25 @@ const readyScout: ScoutApprovalInput = {
   lastName: "Scout",
   phone: "252-555-0100",
   legalVersion: currentLegalVersion,
+  legalAcceptedAt: new Date("2026-09-01T12:00:00.000Z"),
   handbookVersion: SCOUT_HANDBOOK_VERSION,
   handbookAcceptedAt: new Date("2026-09-01T12:00:00.000Z"),
   identityCheck: "clear",
+  identityProvider: "stripe_connect_v2",
+  identityVerificationReference: "person_ready",
   identityVerifiedName: "Ready Scout",
   identityVerifiedAt: new Date("2026-09-01T12:00:00.000Z"),
+  identityVerifiedBy: null,
   headshotPath: "scout-headshots/ready.webp",
   homeZip: "28562",
+  serviceRadiusMiles: 25,
   vehicleType: "Car",
   canSee: true,
   canMove: true,
   canMeet: true,
   verificationConsentedAt: new Date("2026-09-01T12:00:00.000Z"),
   stripeAccountId: "acct_ready",
+  stripeAccountApiVersion: "v2",
   stripeAccountLivemode: true,
   stripeConnectStatus: "ready",
   stripeDetailsSubmitted: true,
@@ -47,7 +53,10 @@ const readyScout: ScoutApprovalInput = {
   stripeRequirementsCurrentlyDue: [],
   stripeRequirementsPastDue: [],
   stripeRequirementsPendingVerification: [],
+  stripeOnboardingCompletedAt: new Date("2026-09-01T12:00:00.000Z"),
   stripePayoutScheduleConfiguredAt: new Date("2026-09-01T12:00:00.000Z"),
+  stripeSyncGeneration: 0,
+  stripeSyncCompletedGeneration: 0,
 };
 
 function stateMap(input: ScoutApprovalInput) {
@@ -203,9 +212,11 @@ test("next-step guidance prioritizes Scout work before Control Room review", () 
     identityVerifiedAt: null,
   }, currentLegalVersion, true, "applicant");
   assert.equal(identityReview.key, "identity");
-  assert.equal(identityReview.owner, "control_room");
+  assert.equal(identityReview.owner, "system");
 
-  assert.equal(nextScoutOnboardingStep(readyScout, currentLegalVersion, true, "applicant").key, "approval");
+  const approval = nextScoutOnboardingStep(readyScout, currentLegalVersion, true, "applicant");
+  assert.equal(approval.key, "approval");
+  assert.equal(approval.owner, "system");
   assert.equal(nextScoutOnboardingStep(readyScout, currentLegalVersion, true, "approved").key, "complete");
 });
 

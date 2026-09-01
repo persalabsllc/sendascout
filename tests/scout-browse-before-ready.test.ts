@@ -23,16 +23,21 @@ const missionWorkspace = source("components/mission-workspace.tsx");
 const missionActions = source("app/actions/missions.ts");
 const notifications = source("lib/notifications.ts");
 const notificationPage = source("app/dashboard/notifications/page.tsx");
+const claimReadiness = source("lib/scout-claim-readiness.ts");
+const activeScout = { role: "scout", status: "active" };
 
-test("active Scout application states can browse while paused, rejected, and missing profiles cannot", () => {
+test("only active Scout users in browse-eligible profile states can browse open missions", () => {
   for (const status of ["applicant", "review", "approved"]) {
-    assert.equal(scoutCanBrowseOpenMissions({ status }), true, `${status} should browse open missions`);
+    assert.equal(scoutCanBrowseOpenMissions(activeScout, { status }), true, `${status} should browse open missions`);
   }
   for (const status of ["paused", "rejected", "unknown"]) {
-    assert.equal(scoutCanBrowseOpenMissions({ status }), false, `${status} should not browse open missions`);
+    assert.equal(scoutCanBrowseOpenMissions(activeScout, { status }), false, `${status} should not browse open missions`);
   }
-  assert.equal(scoutCanBrowseOpenMissions(null), false);
-  assert.equal(scoutCanBrowseOpenMissions(undefined), false);
+  assert.equal(scoutCanBrowseOpenMissions({ role: "scout", status: "suspended" }, { status: "approved" }), false);
+  assert.equal(scoutCanBrowseOpenMissions({ role: "customer", status: "active" }, { status: "approved" }), false);
+  assert.equal(scoutCanBrowseOpenMissions({ role: "admin", status: "active" }, { status: "approved" }), false);
+  assert.equal(scoutCanBrowseOpenMissions(activeScout, null), false);
+  assert.equal(scoutCanBrowseOpenMissions(null, { status: "approved" }), false);
 
   assert.match(missionBoard, /profile\.status === "paused"[\s\S]*New opportunities are hidden/);
   assert.match(missionBoard, /profile\.status === "rejected"[\s\S]*not eligible to browse or claim/);
@@ -41,12 +46,12 @@ test("active Scout application states can browse while paused, rejected, and mis
   assert.match(missionWorkspace, /!assigned && !canClaim && claimRequirement/);
   assert.match(source("components/dashboard.tsx"), /<EmptyMissions profileStatus=\{profileStatus\}/);
   assert.match(source("components/dashboard.tsx"), /profileStatus === "paused" \? "New opportunities are paused"/);
-  assert.match(scoutOverview, /scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(scoutOverview, /scoutCanBrowseOpenMissions\(user, profile\)/);
 });
 
 test("overview and Mission Board browse paid open missions independently of claim readiness", () => {
   for (const page of [scoutOverview, missionBoard]) {
-    assert.match(page, /const canBrowseOpen = scoutCanBrowseOpenMissions\(profile\)/);
+    assert.match(page, /const canBrowseOpen = scoutCanBrowseOpenMissions\(user, profile\)/);
     assert.match(page, /canBrowseOpen\s*\?/);
     assert.match(page, /eq\(missions\.scoutId, user\.id\)/);
     assert.match(page, /eq\(missions\.status, "open"\)/);
@@ -68,16 +73,20 @@ test("every browse surface preserves paid, matching, assigned-work, and private 
     assert.doesNotMatch(page, /isNull\(missions\.preferredScoutExclusiveUntil\)/);
     assert.match(page, /lte\(missions\.preferredScoutExclusiveUntil, sql`now\(\)`\)/);
   }
+  assert.match(scoutOverview, /canBrowseOpen[\s\S]*\? db\.select\(\)\.from\(missions\)[\s\S]*: db\.select\(\)\.from\(missions\)\.where\(and\(isNull\(missions\.archivedAt\), eq\(missions\.scoutId, user\.id\)\)\)/);
+  assert.match(missionBoard, /canBrowseOpen \? or\([\s\S]*\) : eq\(missions\.scoutId, user\.id\)/);
 
   assert.match(missionPage, /mission\.scoutId === user\.id/);
-  assert.match(missionPage, /scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(missionPage, /user\.role === "scout" && user\.status === "active"/);
+  assert.match(missionPage, /scoutCanBrowseOpenMissions\(user, profile\)/);
   assert.match(missionPage, /itinerary\.some\(\(leg\) => leg\.paymentStatus !== "paid"\)/);
   assert.match(missionPage, /claimWindows\.some\(\(window\) => !window\.available\)/);
   assert.doesNotMatch(missionPage, /preferredScoutExclusiveUntil\} IS NULL/);
   assert.match(missionPage, /itinerary\.some\(\(leg\) => !isMissionEligibleForScout\(leg, profile\)\)/);
 
   assert.match(missionMap, /mission\.scoutId === user\.id/);
-  assert.match(missionMap, /scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(missionMap, /user\.role === "scout" && user\.status === "active"/);
+  assert.match(missionMap, /scoutCanBrowseOpenMissions\(user, profile\)/);
   assert.match(missionMap, /const privateFirstLook = itinerary\.some/);
   assert.match(missionMap, /leg\.preferredScoutId !== user\.id/);
   assert.match(missionMap, /!leg\.preferredScoutExclusiveUntil \|\| leg\.preferredScoutExclusiveUntil\.getTime\(\) > Date\.now\(\)/);
@@ -106,7 +115,7 @@ test("browse-only mission details stay redacted and use a coarser planning map",
 });
 
 test("direct browsing and claim readiness are separate decisions", () => {
-  const browseGuard = missionPage.indexOf("scoutCanBrowseOpenMissions(profile)");
+  const browseGuard = missionPage.indexOf("scoutCanBrowseOpenMissions(user, profile)");
   const claimDecision = missionPage.indexOf('canClaim = profile.status === "approved"', browseGuard);
   assert.ok(browseGuard >= 0 && claimDecision > browseGuard);
 
@@ -115,13 +124,19 @@ test("direct browsing and claim readiness are separate decisions", () => {
   assert.match(claimReadiness, /scoutReadyForApproval\(\{ \.\.\.profile, \.\.\.user \}, LEGAL_VERSION, getStripeLivemode\(\)\)/);
 });
 
+test("new-mission notifications follow the same active Scout browse policy", () => {
+  assert.match(scoutOverview, /canBrowseOpen && handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
+  assert.match(scoutOverview, /item\.kind === "new_mission" && \(!canBrowseOpen \|\| !handbookAccepted\)/);
+  assert.match(notificationPage, /scoutCanBrowseOpenMissions\(user, scoutProfileRows\[0\]\)/);
+  assert.match(notificationPage, /canBrowseOpen && handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
+});
+
 test("claimMission retains prechecks and two independent atomic readiness locks", () => {
   const claimSource = section(missionActions, "export async function claimMission", "export async function updateMissionStatus");
 
   assert.match(claimSource, /profile\.status !== "approved"/);
-  assert.match(claimSource, /profile\.identityCheck !== "clear"/);
   assert.match(claimSource, /hasCurrentScoutHandbookAcceptance\(profile\)/);
-  assert.match(claimSource, /scoutConnectReady\(profile, stripeLivemode\)/);
+  assert.match(claimSource, /scoutReadyForApproval\(\{/);
   assert.match(claimSource, /missionsToCheck\.some\(\(candidate\) => candidate\.paymentStatus !== "paid"\)/);
   assert.match(claimSource, /missionsToCheck\.some\(\(candidate\) => !isMissionEligibleForScout\(candidate, profile\)\)/);
   assert.match(claimSource, /This mission is currently in another Scout’s private first-look window\./);
@@ -154,20 +169,21 @@ test("mission notifications remain restricted to Scouts who are claim-ready", ()
   const newMissionAlerts = section(notifications, "export async function alertEligibleScouts", "export async function alertScoutToOpenMissions");
   const backfillAlerts = section(notifications, "export async function alertScoutToOpenMissions");
   const readinessPredicates = [
-    /eq\(scoutProfiles\.status, "approved"\)/,
+    /inArray\(scoutProfiles\.status, allowedStatuses\)/,
     /eq\(scoutProfiles\.handbookVersion, SCOUT_HANDBOOK_VERSION\)/,
     /isNotNull\(scoutProfiles\.handbookAcceptedAt\)/,
-    /eq\(scoutProfiles\.stripeAccountLivemode, stripeLivemode\)/,
+    /eq\(scoutProfiles\.stripeAccountLivemode, expectedLivemode\)/,
     /eq\(scoutProfiles\.stripeConnectStatus, "ready"\)/,
     /eq\(scoutProfiles\.stripeTransfersActive, true\)/,
     /eq\(scoutProfiles\.payoutsEnabled, true\)/,
-    /stripePayoutScheduleConfiguredAt\} IS NOT NULL/,
-    /stripeAccountId\} IS NOT NULL/,
+    /isNotNull\(scoutProfiles\.stripePayoutScheduleConfiguredAt\)/,
+    /isNotNull\(scoutProfiles\.stripeAccountId\)/,
   ];
   for (const alertSource of [newMissionAlerts, backfillAlerts]) {
-    for (const predicate of readinessPredicates) assert.match(alertSource, predicate);
+    assert.match(alertSource, /scoutClaimReadinessConditions\(stripeLivemode\)/);
   }
+  for (const predicate of readinessPredicates) assert.match(claimReadiness, predicate);
 
-  assert.match(notificationPage, /handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
-  assert.match(scoutOverview, /handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
+  assert.match(notificationPage, /canBrowseOpen && handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
+  assert.match(scoutOverview, /canBrowseOpen && handbookAccepted \? undefined : ne\(notifications\.kind, "new_mission"\)/);
 });

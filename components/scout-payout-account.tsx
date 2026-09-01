@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { IconAlertTriangle, IconExternalLink, IconRefresh, IconShieldCheck, IconWallet } from "@tabler/icons-react";
+import { IconAlertTriangle, IconCopy, IconExternalLink, IconRefresh, IconShieldCheck, IconWallet } from "@tabler/icons-react";
 import { openScoutStripeDashboard, refreshScoutStripeStatus, startScoutStripeOnboarding } from "@/app/actions/stripe-connect";
+import { isUnsupportedStripeEmbeddedBrowser } from "@/lib/stripe-connect-browser";
 import { stripeConnectStatusLabel } from "@/lib/stripe-connect";
 
 type Props = {
@@ -24,6 +25,8 @@ export function ScoutPayoutAccount(props: Props) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState("");
   const [showAccountChoice, setShowAccountChoice] = useState(false);
+  const [embeddedBrowserBlocked, setEmbeddedBrowserBlocked] = useState(false);
+  const [copyStatus, setCopyStatus] = useState("");
   const choiceHeadingRef = useRef<HTMLHeadingElement>(null);
   const modeMismatch = props.hasAccount && !props.livemodeMatches;
   const ready = props.status === "ready" && props.livemodeMatches && props.canReceiveTransfers && props.payoutScheduleConfigured;
@@ -36,6 +39,12 @@ export function ScoutPayoutAccount(props: Props) {
   }, [showAccountChoice]);
 
   function openOnboarding(payoutOwnerType?: "individual" | "company") {
+    if (isUnsupportedStripeEmbeddedBrowser(navigator.userAgent)) {
+      setEmbeddedBrowserBlocked(true);
+      setShowAccountChoice(false);
+      setMessage("");
+      return;
+    }
     if (!props.hasAccount && !payoutOwnerType) {
       setShowAccountChoice(true);
       setMessage("");
@@ -45,11 +54,21 @@ export function ScoutPayoutAccount(props: Props) {
     startTransition(async () => {
       const result = await startScoutStripeOnboarding(payoutOwnerType);
       if (!result.ok) {
+        if (result.reason === "embedded_browser") setEmbeddedBrowserBlocked(true);
         setMessage(result.error);
         router.refresh();
       }
       else window.location.assign(result.url);
     });
+  }
+
+  async function copyExternalBrowserLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopyStatus("Link copied. Paste it into Safari or Chrome.");
+    } catch {
+      setCopyStatus("Open sendascout.com/dashboard/scout/earnings in Safari or Chrome.");
+    }
   }
 
   function openDashboard() {
@@ -74,7 +93,7 @@ export function ScoutPayoutAccount(props: Props) {
     <div className="payout-account-main">
       <div className="payout-account-heading"><div><span className="kicker">Stripe Connect</span><h2>Scout payout account</h2></div><span className="status">{modeMismatch ? "Reconnect required" : stripeConnectStatusLabel(props.status)}</span></div>
       {ready ? <>
-        <p>Your account can receive mission earnings. Send a Scout initiates eligible transfers each Friday UTC; bank arrival follows Stripe&apos;s payout timing.</p>
+        <p>Approved mission earnings are scheduled for Friday release. Send a Scout transfers eligible earnings to your Stripe balance on Friday UTC, and Stripe sends available funds to your bank on its automatic weekly schedule. Bank arrival timing varies.</p>
         {due.length > 0 && <><p className="payout-account-note">Stripe needs updated information. Transfers are currently available, but complete these items before they become past due.</p><ul>{due.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul></>}
         {!due.length && props.futureDue.length > 0 && <p className="payout-account-note">Stripe lists {props.futureDue.length} future requirement{props.futureDue.length === 1 ? "" : "s"}. We’ll keep showing them here before they become due.</p>}
       </> : schedulePending ? <>
@@ -87,6 +106,15 @@ export function ScoutPayoutAccount(props: Props) {
         {due.length > 0 && <ul>{due.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>}
         {props.disabledReason && <p className="payout-account-note">Stripe status: {props.disabledReason.replaceAll("_", " ")}</p>}
       </>}
+      {embeddedBrowserBlocked && <div className="payout-browser-warning" role="alert">
+        <strong>Open this page in Safari or Chrome</strong>
+        <p>Stripe verification cannot run inside Facebook, Instagram, or Messenger&apos;s built-in browser. Tap the menu (<b>•••</b>) and choose <b>Open in external browser</b>, then return to Earnings and continue setup.</p>
+        <div>
+          <button type="button" className="button button-ghost" onClick={() => void copyExternalBrowserLink()}><IconCopy size={17} /> Copy this page link</button>
+          <a href="mailto:support@sendascout.com?subject=Help%20with%20Scout%20payout%20setup">Email customer support</a>
+        </div>
+        {copyStatus && <small role="status">{copyStatus}</small>}
+      </div>}
       {showAccountChoice && !props.hasAccount && <div className="payout-account-choice" role="group" aria-busy={pending} aria-labelledby="payout-owner-question">
         <h3 id="payout-owner-question" ref={choiceHeadingRef} tabIndex={-1}>How should Stripe verify you?</h3>
         <p>Stripe uses business language for every payout account. Choose the name that should legally receive your mission earnings.</p>
@@ -105,7 +133,7 @@ export function ScoutPayoutAccount(props: Props) {
       </div>}
       {message && <p className={message.includes("refreshed") ? "form-success" : "form-error"}>{message}</p>}
       <div className="payout-account-actions">
-        {ready && !needsAction ? <button className="button" disabled={pending} onClick={openDashboard}>Manage payouts in Stripe <IconExternalLink size={17} /></button> : !schedulePending && !showAccountChoice && <button className="button" disabled={pending} onClick={() => openOnboarding()}>{pending ? "Opening Stripe…" : props.hasAccount ? "Update payout setup" : "Set up secure payouts"} {!pending && <IconExternalLink size={17} />}</button>}
+        {ready && !needsAction ? <button className="button" disabled={pending} onClick={openDashboard}>Manage payouts in Stripe <IconExternalLink size={17} /></button> : !schedulePending && !showAccountChoice && !embeddedBrowserBlocked && <button className="button" disabled={pending} onClick={() => openOnboarding()}>{pending ? "Opening Stripe…" : props.hasAccount ? "Update payout setup" : "Set up secure payouts"} {!pending && <IconExternalLink size={17} />}</button>}
         <button className="button button-ghost" disabled={pending} onClick={refresh}><IconRefresh size={17} /> Refresh status</button>
       </div>
     </div>
