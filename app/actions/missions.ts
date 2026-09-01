@@ -24,6 +24,7 @@ import {
   users,
 } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
+import { reportException } from "@/lib/observability";
 import { alertEligibleScouts, alertScoutToOpenMissions, notifyUser } from "@/lib/notifications";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { calculateMissionQuote, meetPriceForMinutes } from "@/lib/mission-pricing";
@@ -34,6 +35,7 @@ import { scoutApprovalChecklist } from "@/lib/scout-approval";
 import { LEGAL_VERSION } from "@/lib/legal";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
+import { cancelUncollectedBookingCheckout } from "@/lib/stripe-payments";
 import { settleMissionBestEffort } from "@/lib/stripe-settlement";
 import { attemptSavedPayment, ensureAddonPayment } from "@/lib/stripe-payment-addons";
 import { meetActionIsAvailable, meetActionOpensAt } from "@/lib/mission-timing";
@@ -80,6 +82,7 @@ const activeStatuses: MissionStatus[] = [
 function refreshMission(id: string) {
   revalidatePath(`/dashboard/missions/${id}`);
   revalidatePath("/dashboard/customer");
+  revalidatePath("/dashboard/customer/payments");
   revalidatePath("/dashboard/scout");
   revalidatePath("/control-room");
 }
@@ -1790,6 +1793,11 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
       }
     }
     if (status === "cancelled") {
+      try {
+        await cancelUncollectedBookingCheckout(rootMission.id);
+      } catch (error) {
+        await reportException(error, { route: "missions.admin_cancel_uncollected_booking_checkout", missionId: rootMission.id });
+      }
       await notifyUser({ recipientUserId: mission.customerId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled. Any eligible payment adjustment will follow the cancellation policy.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${id}` });
       if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_cancelled", title: "Mission cancelled", body: "This mission has been cancelled and removed from your active work.", actionLabel: "Open Scout dashboard", actionUrl: "https://sendascout.com/dashboard/scout" });
     }

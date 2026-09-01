@@ -30,6 +30,7 @@ import {
 } from "@/lib/mission-operations";
 import { notifyUser, retryNotification } from "@/lib/notifications";
 import { reportException } from "@/lib/observability";
+import { cancelUncollectedBookingCheckout } from "@/lib/stripe-payments";
 import { getMissionRefundCapacity } from "@/lib/stripe-refund-capacity";
 import { missionCaseRefundReason, requestMissionRefund } from "@/lib/stripe-refunds";
 import { settleCasePayoutBestEffort, settleMissionBestEffort } from "@/lib/stripe-settlement";
@@ -42,6 +43,7 @@ const TWO_PERSON_REFUND_THRESHOLD_CENTS = 10_000;
 function refreshOperations(missionId: string) {
   revalidatePath(`/dashboard/missions/${missionId}`);
   revalidatePath("/dashboard/customer");
+  revalidatePath("/dashboard/customer/payments");
   revalidatePath("/dashboard/scout");
   revalidatePath("/control-room");
 }
@@ -298,6 +300,14 @@ export async function openMissionCase(missionId: string, kind: MissionCaseKind, 
         });
       } catch (error) {
         await reportException(error, { route: "operations.open_case_refund", missionId, caseId });
+      }
+    }
+
+    if (immediateCancellation) {
+      try {
+        await cancelUncollectedBookingCheckout(missionId);
+      } catch (error) {
+        await reportException(error, { route: "operations.cancel_uncollected_booking_checkout", missionId, caseId });
       }
     }
 
@@ -663,6 +673,13 @@ export async function adminResolveMissionCase(
     }
     if (resolution !== "hold" && payoutAmountCents > 0) {
       await settleCasePayoutBestEffort(caseId, "case_resolution");
+    }
+    if (resolution === "cancel") {
+      try {
+        await cancelUncollectedBookingCheckout(item.mission.id);
+      } catch (error) {
+        await reportException(error, { route: "operations.resolve_case_cancel_uncollected_booking_checkout", missionId: item.mission.id, caseId });
+      }
     }
 
     const body = resolution === "resume" ? "Control Room reviewed the report and restored the mission."
