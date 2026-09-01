@@ -606,9 +606,9 @@ export async function applyPaidAddonPayment(paymentId: string) {
 
   const expectedBundleCount = row.mission.bundleId ? 1 : 0;
   const applyTime = new Date();
-  let applied: Array<{ id: string }>;
+  let applied: { id: string } | undefined;
   try {
-    applied = await db.execute(sql`
+    const appliedResult = await db.execute<{ id: string }>(sql`
     WITH locked_mission AS MATERIALIZED (
       SELECT active_mission.id, active_mission.bundle_id, active_mission.bundle_sequence,
         active_mission.status, active_mission.archived_at
@@ -696,7 +696,8 @@ export async function applyPaidAddonPayment(paymentId: string) {
       THEN (SELECT id::text FROM approved_order)
       ELSE (1 / ((SELECT COUNT(*)::integer FROM approved_order) - (SELECT COUNT(*)::integer FROM approved_order)))::text
     END AS id
-    `) as unknown as Array<{ id: string }>;
+    `);
+    applied = appliedResult.rows[0];
   } catch (error) {
     const currentState = await getPaidChangeOrderState(row.payment.id);
     if (currentState === "applied") {
@@ -707,7 +708,7 @@ export async function applyPaidAddonPayment(paymentId: string) {
     }
     throw error;
   }
-  if (!applied[0]?.id) throw new Error("Paid change order could not be authorized atomically.");
+  if (!applied?.id) throw new Error("Paid change order could not be authorized atomically.");
 
   const recipients = new Set([row.mission.customerId, row.mission.scoutId].filter((id): id is string => Boolean(id)));
   for (const recipientUserId of recipients) {
@@ -726,7 +727,7 @@ export async function applyPaidAddonPayment(paymentId: string) {
 
 export async function reconcilePaidAddonApplications(limit = 25) {
   const boundedLimit = Math.max(1, Math.min(100, Number.isSafeInteger(limit) ? limit : 25));
-  const rows = await getDb().execute(sql`
+  const result = await getDb().execute<{ id: string }>(sql`
     SELECT paid_addon.id
     FROM payments AS paid_addon
     LEFT JOIN mission_change_orders AS requested
@@ -754,7 +755,8 @@ export async function reconcilePaidAddonApplications(limit = 25) {
       )
     ORDER BY paid_addon.updated_at ASC
     LIMIT ${boundedLimit}
-  `) as unknown as Array<{ id: string }>;
+  `);
+  const rows = result.rows;
 
   let applied = 0;
   let late = 0;

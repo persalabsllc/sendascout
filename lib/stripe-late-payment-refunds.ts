@@ -73,7 +73,17 @@ async function refundLatePayment(paymentId: string) {
 }
 
 async function readLatePaymentRefundState(paymentId: string): Promise<LatePaymentRefundState | null> {
-  const rows = await getDb().execute(sql`
+  const result = await getDb().execute<{
+    payment_id: string;
+    payment_kind: string;
+    has_stripe_charge: boolean;
+    target_cents: number;
+    succeeded_cents: number;
+    pending_cents: number;
+    residual_cents: number;
+    failed_cents: number;
+    late_request_count: number;
+  }>(sql`
     WITH refund_totals AS MATERIALIZED (
       SELECT payment.id AS payment_id,
         payment.kind AS payment_kind,
@@ -128,18 +138,8 @@ async function readLatePaymentRefundState(paymentId: string): Promise<LatePaymen
       normalized.late_failed_cents AS failed_cents,
       normalized.late_request_count
     FROM normalized
-  `) as unknown as Array<{
-    payment_id: string;
-    payment_kind: string;
-    has_stripe_charge: boolean;
-    target_cents: number;
-    succeeded_cents: number;
-    pending_cents: number;
-    residual_cents: number;
-    failed_cents: number;
-    late_request_count: number;
-  }>;
-  const row = rows[0];
+  `);
+  const row = result.rows[0];
   if (!row) return null;
   return {
     paymentId: row.payment_id,

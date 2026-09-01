@@ -7,7 +7,7 @@ import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
 import { reportException, runOperationalHealthChecks } from "@/lib/observability";
 import { reconcileScoutPayoutReadiness } from "@/lib/stripe-connect-service";
 import { reconcileLatePaymentRefunds } from "@/lib/stripe-late-payment-refunds";
-import { reconcileAmbiguousOffSessionPayments } from "@/lib/stripe-payment-addons";
+import { reconcileAmbiguousOffSessionPayments, reconcilePendingTipPayments } from "@/lib/stripe-payment-addons";
 import { reconcilePaidAddonApplications } from "@/lib/stripe-payments";
 import {
   processPendingPaymentRefunds,
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
     let completed = 0;
     for (const mission of pending) {
       const now = new Date();
-      const completionRows = await db.execute(sql`
+      const completionResult = await db.execute<{ mission_count: number }>(sql`
         WITH completed_mission AS (
           UPDATE missions AS target
           SET status = 'completed', completed_at = ${now}, updated_at = ${now}
@@ -95,7 +95,8 @@ export async function GET(request: Request) {
             ELSE 0
           END AS invariant
         FROM counts
-      `) as unknown as { mission_count: number }[];
+      `);
+      const completionRows = completionResult.rows;
       if (Number(completionRows[0]?.mission_count ?? 0) !== 1) continue;
       if (mission.scoutId) await notifyUser({ recipientUserId: mission.scoutId, missionId: mission.id, kind: "mission_auto_confirmed", title: "Mission automatically confirmed", body: "The 24-hour customer review window ended, so the mission is now complete.", actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
       await notifyUser({ recipientUserId: mission.customerId, missionId: mission.id, kind: "mission_auto_confirmed", title: "Mission automatically completed", body: "The mission was automatically completed after the 24-hour review window. Contact support promptly if there is a problem.", actionLabel: "View mission", actionUrl: `https://sendascout.com/dashboard/missions/${mission.id}` });
@@ -175,6 +176,7 @@ export async function GET(request: Request) {
     }
     const payoutReadinessReconciliation = await reconcileScoutPayoutReadiness();
     const settledTransferReconciliation = await reconcileSettledPaymentTransfers();
+    const pendingTipReconciliation = await reconcilePendingTipPayments();
     const ambiguousOffSessionReconciliation = await reconcileAmbiguousOffSessionPayments();
     const paidAddonApplicationReconciliation = await reconcilePaidAddonApplications();
     const latePaymentRefundReconciliation = await reconcileLatePaymentRefunds();
@@ -186,8 +188,8 @@ export async function GET(request: Request) {
     const settlementReconciliation = await reconcileCompletedMissionSettlements();
     const transfers = await processPendingPaymentTransfers();
     const health = await runOperationalHealthChecks();
-    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
-    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
+    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
+    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
   } catch (error) {
     await reportException(error, { route: "/api/cron/auto-complete", requestId, durationMs: Date.now() - startedAt });
     return NextResponse.json({ ok: false, error: "Operations check failed." }, { status: 500 });
