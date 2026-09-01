@@ -5,19 +5,25 @@ export type ScoutApprovalInput = {
   lastName: string | null;
   phone: string | null;
   legalVersion: string | null;
+  legalAcceptedAt?: Date | null;
   handbookVersion: string | null;
   handbookAcceptedAt: Date | null;
   identityCheck: string;
+  identityProvider: string | null;
+  identityVerificationReference: string | null;
   identityVerifiedName: string | null;
   identityVerifiedAt: Date | null;
+  identityVerifiedBy: string | null;
   headshotPath: string | null;
   homeZip: string | null;
+  serviceRadiusMiles: number;
   vehicleType: string | null;
   canSee: boolean;
   canMove: boolean;
   canMeet: boolean;
   verificationConsentedAt: Date | null;
   stripeAccountId: string | null;
+  stripeAccountApiVersion?: string | null;
   stripeAccountLivemode: boolean | null;
   stripeConnectStatus: string;
   stripeDetailsSubmitted?: boolean;
@@ -26,7 +32,10 @@ export type ScoutApprovalInput = {
   stripeRequirementsCurrentlyDue?: string[];
   stripeRequirementsPastDue?: string[];
   stripeRequirementsPendingVerification?: string[];
+  stripeOnboardingCompletedAt?: Date | null;
   stripePayoutScheduleConfiguredAt: Date | null;
+  stripeSyncGeneration: number;
+  stripeSyncCompletedGeneration: number;
 };
 
 export type ScoutApprovalCheck = { key: string; label: string; complete: boolean };
@@ -46,18 +55,26 @@ export type ScoutOnboardingNextStep = {
 };
 
 export function scoutApprovalChecklist(input: ScoutApprovalInput, currentLegalVersion: string, expectedLivemode: boolean): ScoutApprovalCheck[] {
+  const stripeIdentity = (input.identityProvider === "stripe_connect_v1" && input.stripeAccountApiVersion === "v1")
+    || (input.identityProvider === "stripe_connect_v2" && input.stripeAccountApiVersion === "v2");
+  const unresolvedStripeRequirements = [
+    ...(input.stripeRequirementsCurrentlyDue ?? []),
+    ...(input.stripeRequirementsPastDue ?? []),
+    ...(input.stripeRequirementsPendingVerification ?? []),
+  ];
+  const stripeSyncCurrent = input.stripeSyncCompletedGeneration === input.stripeSyncGeneration;
   return [
-    { key: "identity", label: "Government ID and verified legal name recorded", complete: input.identityCheck === "clear" && Boolean(input.identityVerifiedName?.trim() && input.identityVerifiedAt) },
-    { key: "terms", label: "Current marketplace terms accepted", complete: input.legalVersion === currentLegalVersion },
+    { key: "identity", label: "Identity verified by Stripe for payouts", complete: input.identityCheck === "clear" && stripeIdentity && input.identityVerifiedBy === null && Boolean(input.identityVerificationReference?.trim() && input.identityVerifiedName?.trim() && input.identityVerifiedAt) },
+    { key: "terms", label: "Current marketplace terms accepted", complete: input.legalVersion === currentLegalVersion && Boolean(input.legalAcceptedAt) },
     { key: "handbook", label: "Current Scout Handbook acknowledged", complete: hasCurrentScoutHandbookAcceptance(input) },
     { key: "name", label: "First and last legal name provided", complete: Boolean(input.firstName?.trim() && input.lastName?.trim()) },
     { key: "phone", label: "Mobile number provided", complete: (input.phone?.replace(/\D/g, "").length ?? 0) >= 10 },
     { key: "headshot", label: "Current profile headshot uploaded", complete: Boolean(input.headshotPath) },
-    { key: "zone", label: "Valid service ZIP and travel zone selected", complete: /^\d{5}$/.test(input.homeZip?.trim() ?? "") },
+    { key: "zone", label: "Valid service ZIP and travel zone selected", complete: /^\d{5}$/.test(input.homeZip?.trim() ?? "") && [10, 25, 50, 75].includes(input.serviceRadiusMiles) },
     { key: "vehicle", label: "Vehicle access recorded", complete: Boolean(input.vehicleType?.trim()) },
     { key: "missions", label: "At least one mission type selected", complete: input.canSee || input.canMove || input.canMeet },
     { key: "consent", label: "Verification consent recorded", complete: Boolean(input.verificationConsentedAt) },
-    { key: "payouts", label: "Stripe payout account verified and ready", complete: Boolean(input.stripeAccountId && input.stripeAccountLivemode === expectedLivemode && input.stripeConnectStatus === "ready" && input.stripeTransfersActive && input.payoutsEnabled && input.stripePayoutScheduleConfiguredAt) },
+    { key: "payouts", label: "Stripe payout account verified and ready", complete: Boolean(input.stripeAccountId && input.stripeAccountApiVersion && input.stripeAccountLivemode === expectedLivemode && stripeSyncCurrent && input.stripeConnectStatus === "ready" && input.stripeDetailsSubmitted && input.stripeTransfersActive && input.payoutsEnabled && input.stripeOnboardingCompletedAt && input.stripePayoutScheduleConfiguredAt && unresolvedStripeRequirements.length === 0) },
   ];
 }
 
@@ -70,7 +87,8 @@ export function scoutStripeReadinessChecklist(input: ScoutApprovalInput, expecte
   const modeMatches = hasAccount && input.stripeAccountLivemode === expectedLivemode;
   const due = [...(input.stripeRequirementsPastDue ?? []), ...(input.stripeRequirementsCurrentlyDue ?? [])];
   const restricted = input.stripeConnectStatus === "restricted" || input.stripeConnectStatus === "disabled" || due.length > 0;
-  const verificationState: ScoutStripeReadinessState = input.stripeConnectStatus === "ready"
+  const stripeSyncCurrent = input.stripeSyncCompletedGeneration === input.stripeSyncGeneration;
+  const verificationState: ScoutStripeReadinessState = stripeSyncCurrent && input.stripeConnectStatus === "ready"
     ? "complete"
     : restricted
       ? "action_required"
@@ -100,17 +118,21 @@ export function scoutStripeReadinessChecklist(input: ScoutApprovalInput, expecte
       key: "verification",
       label: "Stripe verification cleared",
       state: verificationState,
-      detail: input.stripeRequirementsPendingVerification?.length ? "Stripe is reviewing submitted information." : undefined,
+      detail: !stripeSyncCurrent
+        ? "Stripe status refresh is in progress. No action is required while this finishes."
+        : input.stripeRequirementsPendingVerification?.length
+          ? "Stripe is reviewing submitted information."
+          : undefined,
     },
     {
       key: "capabilities",
       label: "Transfers and bank payouts enabled",
-      state: capabilitiesReady ? "complete" : restricted ? "action_required" : hasAccount ? "pending" : "missing",
+      state: stripeSyncCurrent && capabilitiesReady ? "complete" : restricted ? "action_required" : hasAccount ? "pending" : "missing",
     },
     {
       key: "schedule",
       label: "Automatic weekly Friday payout schedule verified",
-      state: input.stripePayoutScheduleConfiguredAt ? "complete" : capabilitiesReady ? "pending" : hasAccount ? "pending" : "missing",
+      state: stripeSyncCurrent && input.stripePayoutScheduleConfiguredAt ? "complete" : capabilitiesReady ? "pending" : hasAccount ? "pending" : "missing",
       detail: "Configured automatically by Send a Scout; no Scout action is required.",
     },
   ];
@@ -206,8 +228,8 @@ export function nextScoutOnboardingStep(
     return { key: "payouts", label: "Send a Scout is verifying the automatic weekly payout schedule.", owner: "system" };
   }
   if (missing.has("identity")) {
-    return { key: "identity", label: "Control Room must complete the live government ID review.", owner: "control_room" };
+    return { key: "identity", label: "Send a Scout is syncing the legal identity Stripe cleared for payouts.", owner: "system" };
   }
-  if (profileStatus !== "approved") return { key: "approval", label: "All requirements complete — Control Room can approve this Scout.", owner: "control_room" };
+  if (profileStatus !== "approved") return { key: "approval", label: "All requirements complete — automatic approval is being finalized.", owner: "system" };
   return { key: "complete", label: "Onboarding complete — ready to claim missions.", owner: "complete" };
 }

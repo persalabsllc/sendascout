@@ -9,6 +9,7 @@ import { getDb } from "@/db";
 import { notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
+import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
 
 export const metadata = { title: "Notifications | Send a Scout", robots: { index: false, follow: false } };
 
@@ -18,12 +19,14 @@ export default async function NotificationsPage() {
   const db = getDb();
   const scoutProfileRows = role === "scout"
     ? await db.select({
+      status: scoutProfiles.status,
       handbookVersion: scoutProfiles.handbookVersion,
       handbookAcceptedAt: scoutProfiles.handbookAcceptedAt,
     }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1)
     : [];
   const handbookAccepted = role !== "scout" || hasCurrentScoutHandbookAcceptance(scoutProfileRows[0]);
-  const visibilityFilter = handbookAccepted ? undefined : ne(notifications.kind, "new_mission");
+  const canBrowseOpen = scoutCanBrowseOpenMissions(user, scoutProfileRows[0]);
+  const visibilityFilter = canBrowseOpen && handbookAccepted ? undefined : ne(notifications.kind, "new_mission");
   const rows = await db.select().from(notifications)
     .where(and(
       eq(notifications.recipientUserId, user.id),

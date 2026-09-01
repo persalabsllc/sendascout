@@ -7,6 +7,7 @@ import { requireAppUser } from "@/lib/app-user";
 import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
+import { buildScoutOnboardingProgress } from "@/lib/scout-onboarding-progress";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 
@@ -24,7 +25,44 @@ export default async function ScoutDashboard() {
   const stripeLivemode = getStripeLivemode();
   const payoutReady = scoutConnectReady(profile, stripeLivemode);
   const handbookAccepted = hasCurrentScoutHandbookAcceptance(profile);
-  const canBrowseOpen = scoutCanBrowseOpenMissions(profile);
+  const onboardingProgress = buildScoutOnboardingProgress({
+    firstName: user.firstName,
+    lastName: user.lastName,
+    phone: user.phone,
+    legalVersion: user.legalVersion,
+    legalAcceptedAt: user.legalAcceptedAt,
+    handbookVersion: profile.handbookVersion,
+    handbookAcceptedAt: profile.handbookAcceptedAt,
+    headshotPath: profile.headshotPath,
+    homeZip: profile.homeZip,
+    serviceRadiusMiles: profile.serviceRadiusMiles,
+    vehicleType: profile.vehicleType,
+    canSee: profile.canSee,
+    canMove: profile.canMove,
+    canMeet: profile.canMeet,
+    verificationConsentedAt: profile.verificationConsentedAt,
+    identityCheck: profile.identityCheck,
+    identityProvider: profile.identityProvider,
+    identityVerificationReference: profile.identityVerificationReference,
+    identityVerifiedName: profile.identityVerifiedName,
+    identityVerifiedAt: profile.identityVerifiedAt,
+    identityVerifiedBy: profile.identityVerifiedBy,
+    stripeAccountId: profile.stripeAccountId,
+    stripeAccountApiVersion: profile.stripeAccountApiVersion,
+    stripeAccountLivemode: profile.stripeAccountLivemode,
+    stripeConnectStatus: profile.stripeConnectStatus,
+    stripeDetailsSubmitted: profile.stripeDetailsSubmitted,
+    stripeTransfersActive: profile.stripeTransfersActive,
+    payoutsEnabled: profile.payoutsEnabled,
+    stripeRequirementsCurrentlyDue: profile.stripeRequirementsCurrentlyDue,
+    stripeRequirementsPastDue: profile.stripeRequirementsPastDue,
+    stripeRequirementsPendingVerification: profile.stripeRequirementsPendingVerification,
+    stripeOnboardingCompletedAt: profile.stripeOnboardingCompletedAt,
+    stripePayoutScheduleConfiguredAt: profile.stripePayoutScheduleConfiguredAt,
+    stripeSyncGeneration: profile.stripeSyncGeneration,
+    stripeSyncCompletedGeneration: profile.stripeSyncCompletedGeneration,
+  }, stripeLivemode);
+  const canBrowseOpen = scoutCanBrowseOpenMissions(user, profile);
   const [rows, alertRows] = await Promise.all([
     canBrowseOpen
       ? db.select().from(missions).where(and(isNull(missions.archivedAt), or(
@@ -41,7 +79,7 @@ export default async function ScoutDashboard() {
       eq(notifications.recipientUserId, user.id),
       eq(notifications.channel, "in_app"),
       isNull(notifications.readAt),
-      handbookAccepted ? undefined : ne(notifications.kind, "new_mission"),
+      canBrowseOpen && handbookAccepted ? undefined : ne(notifications.kind, "new_mission"),
     )).orderBy(desc(notifications.createdAt)).limit(5),
   ]);
   const bundleIds = [...new Set(rows.flatMap((mission) => mission.bundleId ? [mission.bundleId] : []))];
@@ -83,12 +121,12 @@ export default async function ScoutDashboard() {
   const missionById = new Map(visibleRows.map((mission) => [mission.id, mission]));
   const dashboardNotifications: DashboardNotification[] = alertRows
     .filter((item) => {
-      if (item.kind === "new_mission" && !handbookAccepted) return false;
+      if (item.kind === "new_mission" && (!canBrowseOpen || !handbookAccepted)) return false;
       if (!item.missionId) return true;
       const mission = missionById.get(item.missionId);
       if (item.kind === "new_mission") return mission?.status === "open";
       return !mission || !["completed", "cancelled", "disputed"].includes(mission.status);
     })
     .map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
-  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} scoutPayoutReady={payoutReady} scoutHandbookAccepted={handbookAccepted} />;
+  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} scoutPayoutReady={payoutReady} scoutHandbookAccepted={handbookAccepted} scoutOnboardingProgress={onboardingProgress} />;
 }

@@ -443,6 +443,22 @@ button, input, textarea, select { font: inherit; }
 .scout-payout-required-banner p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .scout-payout-required-action { display: inline-flex; align-items: center; gap: 5px; color: #b5442f; font-size: 12px; font-weight: 850; white-space: nowrap; text-underline-offset: 3px; }
 .scout-payout-required-banner:hover .scout-payout-required-action, .scout-payout-required-banner:focus-visible .scout-payout-required-action { text-decoration: underline; }
+.scout-onboarding-progress { margin-bottom: 18px; padding: 24px; border: 1px solid #d7e6e3; border-radius: 20px; background: white; box-shadow: 0 12px 32px rgba(8,43,69,.06); }
+.scout-onboarding-progress-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.scout-onboarding-progress-heading h2 { margin: 4px 0 5px; color: var(--navy); font-size: 21px; }
+.scout-onboarding-progress-heading p { margin: 0; color: #6f8087; font-size: 11px; line-height: 1.55; }
+.scout-onboarding-progress-heading > strong { flex: 0 0 auto; min-width: 62px; padding: 9px 11px; border-radius: 999px; background: #e6f8f4; color: #00796b; font-size: 13px; text-align: center; }
+.scout-onboarding-progress-bar { height: 8px; margin: 17px 0 19px; overflow: hidden; border-radius: 999px; background: #e8efee; }
+.scout-onboarding-progress-bar span { display: block; width: var(--onboarding-progress); height: 100%; border-radius: inherit; background: linear-gradient(90deg, #00a890, var(--teal)); }
+.scout-onboarding-progress ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; margin: 0; padding: 0; list-style: none; }
+.scout-onboarding-progress li { display: flex; align-items: center; gap: 8px; min-width: 0; color: #61747b; font-size: 11px; line-height: 1.4; }
+.scout-onboarding-progress li svg { flex: 0 0 auto; }
+.scout-onboarding-progress li.complete { color: #298373; }
+.scout-onboarding-progress li.missing { color: #ad543f; font-weight: 750; }
+.scout-onboarding-progress-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px 20px; margin-top: 21px; padding-top: 18px; border-top: 1px solid #edf1f0; }
+.scout-onboarding-progress-actions .button { min-height: 43px; padding: 10px 15px; font-size: 11px; }
+.scout-onboarding-progress-actions > a:not(.button) { display: inline-flex; align-items: center; gap: 6px; color: #526c76; font-size: 10px; font-weight: 750; text-decoration: underline; text-underline-offset: 3px; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .payout-account-card { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 17px; margin-bottom: 20px; padding: 22px; border: 1px solid #dbe7e6; border-radius: 18px; background: white; }
 .payout-account-card.ready { border-color: #bfe6df; background: linear-gradient(135deg, #fff 0%, #f2fbf9 100%); }
 .payout-account-card.needs-action { border-color: #f1c9bc; background: linear-gradient(135deg, #fff 0%, #fff7f3 100%); }
@@ -468,6 +484,13 @@ button, input, textarea, select { font: inherit; }
 .payout-account-choice-grid small { margin-top: 6px; color: #6e7e85; font-size: 11px; line-height: 1.5; }
 .payout-account-choice .payout-account-opening { margin: 10px 0 0; color: #00796b; font-size: 11px; font-weight: 800; }
 .payout-account-choice-cancel { min-height: 44px; margin-top: 8px; padding: 8px 4px; border: 0; background: transparent; color: #65767d; font-size: 11px; font-weight: 800; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.payout-browser-warning { margin-top: 15px; padding: 16px; border: 1px solid #efbba9; border-radius: 14px; background: #fff5f1; color: #704337; }
+.payout-browser-warning > strong { display: block; color: #913e2d; font-size: 14px; }
+.payout-browser-warning > p { margin: 6px 0 12px; font-size: 11px; line-height: 1.55; }
+.payout-browser-warning > div { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 15px; }
+.payout-browser-warning .button { min-height: 42px; padding: 9px 13px; font-size: 11px; }
+.payout-browser-warning a { color: #8e3e2d; font-size: 11px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.payout-browser-warning small { display: block; margin-top: 9px; color: #526d72; font-size: 10px; font-weight: 750; }
 .payout-account-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
 .payout-account-actions .button { min-height: 44px; padding: 10px 14px; font-size: 11px; }
 .scout-stats .stat-card:nth-child(2) > span { background: #fff0eb; color: var(--coral); }
@@ -920,6 +943,7 @@ button, input, textarea, select { font: inherit; }
   .scout-banner .status { grid-column: 2; justify-self: start; }
   .scout-payout-required-banner { grid-template-columns: 40px minmax(0, 1fr); padding: 16px; }
   .scout-payout-required-action { grid-column: 2; }
+  .scout-onboarding-progress ul { grid-template-columns: 1fr; }
   .payout-account-card { grid-template-columns: 1fr; padding: 18px; }
   .payout-account-heading { flex-direction: column; gap: 5px; }
   .payout-account-choice-grid { grid-template-columns: 1fr; }
@@ -954,6 +978,15 @@ button, input, textarea, select { font: inherit; }
   .legal-summary-grid { grid-template-columns: 1fr; }
   .legal-accept-page > header { align-items: flex-start; gap: 16px; }
   .legal-accept-form .button { width: 100%; }
+}
+
+@media (max-width: 620px) {
+  .scout-onboarding-progress { padding: 19px 17px; border-radius: 17px; }
+  .scout-onboarding-progress-heading { gap: 10px; }
+  .scout-onboarding-progress-heading h2 { font-size: 18px; }
+  .scout-onboarding-progress-heading > strong { min-width: 56px; padding-inline: 8px; }
+  .scout-onboarding-progress-actions { align-items: stretch; flex-direction: column; }
+  .scout-onboarding-progress-actions .button { width: 100%; }
 }
 
 /* Scout handbook */

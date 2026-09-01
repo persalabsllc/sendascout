@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { IconArrowLeft, IconCheck, IconClock, IconRefresh, IconShieldCheck, IconX } from "@tabler/icons-react";
-import { adminRecordScoutIdentity, adminSetScoutStatus } from "@/app/actions/missions";
+import { IconArrowLeft, IconCheck, IconClock, IconRefresh, IconX } from "@tabler/icons-react";
+import { adminSetScoutStatus } from "@/app/actions/missions";
 import { adminRefreshScoutStripeStatus } from "@/app/actions/stripe-connect";
 import { Brand } from "./brand";
 
@@ -45,7 +45,7 @@ export function ControlRoomScouts({ scouts }: { scouts: ScoutAdminRow[] }) {
     <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room">Control Room</Link><Link href="/">Public site</Link></div></header>
     <div className="control-shell">
       <Link className="control-back" href="/control-room"><IconArrowLeft size={16} /> Marketplace operations</Link>
-      <div className="control-title"><div><span className="kicker">Scout management</span><h1>Scouts and applications</h1><p>Review applications, identity requirements and Scout account status without crowding the main operations dashboard.</p></div></div>
+      <div className="control-title"><div><span className="kicker">Scout management</span><h1>Scouts and applications</h1><p>Monitor automated onboarding, Stripe requirements and Scout account status without crowding the main operations dashboard.</p></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}
       {feedback && <p className="form-success" role="status">{feedback}</p>}
       <section className="control-section">
@@ -54,7 +54,7 @@ export function ControlRoomScouts({ scouts }: { scouts: ScoutAdminRow[] }) {
           <div className="control-primary">
             <strong>{scout.name}</strong><span>{scout.email} · {scout.phone || "No phone"}</span>
             <small>{scout.vehicle || "Vehicle not provided"} · {scout.zip} + {scout.radius} miles · {scout.capabilities}</small>
-            <small>{scout.identityStatus === "clear" ? `Identity verified${scout.identityVerifiedAt ? ` ${formatUtcDate(scout.identityVerifiedAt)}` : ""}` : "Identity not yet verified"} · {scout.legalVersion ? `Terms ${scout.legalVersion} accepted` : "Terms acceptance pending"}</small>
+            <small>{stripeIdentityIsClear(scout) ? `Stripe identity cleared${scout.identityVerifiedAt ? ` ${formatUtcDate(scout.identityVerifiedAt)}` : ""}` : "Stripe identity not yet cleared"} · {scout.legalVersion ? `Terms ${scout.legalVersion} accepted` : "Terms acceptance pending"}</small>
             <div className={`scout-next-step owner-${scout.nextStep.owner}`}><strong>Recommended next action</strong><span>{scout.nextStep.label}</span></div>
             <div className="approval-checklist">{scout.checklist.filter((item) => item.key !== "payouts").map((item) => <span className={item.complete ? "complete" : "missing"} key={item.key}>{item.complete ? <IconCheck size={13} /> : <IconX size={13} />}{item.label}</span>)}</div>
             <StripeReadinessDetails stripe={scout.stripe} />
@@ -62,13 +62,13 @@ export function ControlRoomScouts({ scouts }: { scouts: ScoutAdminRow[] }) {
           <span className="status">{titleCase(scout.status)}</span>
           <div className="control-actions">
             {scout.stripe.hasAccount && <button disabled={pending} onClick={() => run(() => adminRefreshScoutStripeStatus(scout.id), `Stripe status refreshed for ${scout.name}.`)}><IconRefresh size={16} /> Refresh Stripe</button>}
-            {scout.identityStatus !== "clear" && <button disabled={pending} onClick={() => run(() => adminRecordScoutIdentity(scout.id))}><IconShieldCheck size={16} /> Record ID verified</button>}
-            {scout.status !== "approved" && <button disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "approved"))}><IconCheck size={16} /> Approve</button>}
+            {(scout.status === "applicant" || scout.status === "review") && <span className="control-automatic-status"><IconClock size={16} /> Approves automatically when ready</span>}
+            {scout.status === "paused" && <button disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "approved"))}><IconCheck size={16} /> Restore access</button>}
             {scout.status === "approved" && <button disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "paused"))}>Pause</button>}
             {scout.status !== "rejected" && <button className="danger-link" disabled={pending} onClick={() => run(() => adminSetScoutStatus(scout.id, "rejected"))}><IconX size={16} /> Reject</button>}
           </div>
         </article>)}</div> : <div className="control-empty">No Scout applications yet.</div>}
-        <p className="control-review-note">Record identity as verified only after comparing an original government-issued photo ID with the Scout live, in person or by video. Never accept an ID through email or mission chat. The platform records the reviewer and date, not a copy of the document.</p>
+        <p className="control-review-note">Stripe verifies the legal identity used for payouts and Send a Scout records only the verified name, Stripe reference and verification time. Control Room does not review or store identity documents. Stripe may clear identity without requesting a photo ID; mandatory photo-ID or selfie checks would require a separate identity-verification service.</p>
       </section>
     </div>
   </main>;
@@ -109,6 +109,10 @@ function formatUtcDate(value: string) {
 
 function formatUtcDateTime(value: string) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value));
+}
+
+function stripeIdentityIsClear(scout: ScoutAdminRow) {
+  return scout.checklist.find((item) => item.key === "identity")?.complete === true;
 }
 
 function titleCase(value: string) { return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }

@@ -146,6 +146,10 @@ export const scoutProfiles = pgTable("scout_profiles", {
   stripeRequirementsFutureDue: jsonb("stripe_requirements_future_due").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   stripeDisabledReason: text("stripe_disabled_reason"),
   stripeConnectSyncedAt: timestamp("stripe_connect_synced_at", { withTimezone: true }),
+  stripeSyncGeneration: integer("stripe_sync_generation").notNull().default(0),
+  stripeSyncCompletedGeneration: integer("stripe_sync_completed_generation").notNull().default(0),
+  stripeSyncLeaseToken: text("stripe_sync_lease_token"),
+  stripeSyncLeaseExpiresAt: timestamp("stripe_sync_lease_expires_at", { withTimezone: true }),
   stripeOnboardingCompletedAt: timestamp("stripe_onboarding_completed_at", { withTimezone: true }),
   stripePayoutScheduleConfiguredAt: timestamp("stripe_payout_schedule_configured_at", { withTimezone: true }),
   verificationConsentedAt: timestamp("verification_consented_at", { withTimezone: true }),
@@ -168,6 +172,9 @@ export const scoutProfiles = pgTable("scout_profiles", {
   check("scout_profiles_stripe_status_check", sql`${table.stripeConnectStatus} IN ('not_started', 'onboarding', 'pending', 'ready', 'restricted', 'disabled')`),
   check("scout_profiles_handbook_acceptance_check", sql`(${table.handbookVersion} IS NULL AND ${table.handbookAcceptedAt} IS NULL) OR (${table.handbookVersion} IS NOT NULL AND ${table.handbookAcceptedAt} IS NOT NULL)`),
   check("scout_profiles_headshot_upload_count_check", sql`${table.headshotUploadCount} >= 0`),
+  check("scout_profiles_stripe_sync_generation_check", sql`${table.stripeSyncGeneration} >= 0`),
+  check("scout_profiles_stripe_sync_completed_generation_check", sql`${table.stripeSyncCompletedGeneration} >= 0 AND ${table.stripeSyncCompletedGeneration} <= ${table.stripeSyncGeneration}`),
+  check("scout_profiles_stripe_sync_lease_check", sql`(${table.stripeSyncLeaseToken} IS NULL AND ${table.stripeSyncLeaseExpiresAt} IS NULL) OR (${table.stripeSyncLeaseToken} IS NOT NULL AND ${table.stripeSyncLeaseExpiresAt} IS NOT NULL)`),
 ]);
 
 export const scoutHandbookAcceptances = pgTable("scout_handbook_acceptances", {
@@ -310,6 +317,8 @@ export const missions = pgTable("missions", {
   preferredScoutId: uuid("preferred_scout_id").references(() => users.id, { onDelete: "set null" }),
   preferredScoutExclusiveUntil: timestamp("preferred_scout_exclusive_until", { withTimezone: true }),
   preferredScoutBroadcastAt: timestamp("preferred_scout_broadcast_at", { withTimezone: true }),
+  preferredScoutBroadcastGeneration: integer("preferred_scout_broadcast_generation"),
+  alertGeneration: integer("alert_generation").notNull().default(0),
   scoutDisplayNameSnapshot: text("scout_display_name_snapshot"),
   scoutHeadshotPathSnapshot: text("scout_headshot_path_snapshot"),
   scoutIdentityVerifiedAtSnapshot: timestamp("scout_identity_verified_at_snapshot", { withTimezone: true }),
@@ -405,6 +414,8 @@ export const missions = pgTable("missions", {
   check("missions_delivery_pin_check", sql`NOT ${table.deliveryPinRequired} OR (${table.type} = 'move' AND ${table.deliveryPinHash} IS NOT NULL)`),
   check("missions_delivery_pin_attempts_check", sql`${table.deliveryPinFailedAttempts} >= 0`),
   check("missions_result_upload_token_count_check", sql`${table.resultUploadTokenCount} >= 0 AND ${table.resultUploadTokenCount} <= 30`),
+  check("missions_alert_generation_check", sql`${table.alertGeneration} >= 0`),
+  check("missions_preferred_broadcast_generation_check", sql`${table.preferredScoutBroadcastGeneration} IS NULL OR ${table.preferredScoutBroadcastGeneration} >= 0`),
   check("missions_proof_delivery_check", sql`NOT ${table.proofOfDeliveryRequired} OR ${table.type} = 'move'`),
   check("missions_timezone_check", sql`${table.timezone} IN ('America/New_York', 'America/Chicago', 'America/Denver', 'America/Phoenix', 'America/Los_Angeles', 'America/Anchorage', 'Pacific/Honolulu')`),
   check("missions_financial_amounts_check", sql`${table.customerPriceCents} >= 0 AND ${table.scoutPayoutCents} >= 0 AND ${table.platformFeeCents} >= 0 AND ${table.customerPriceCents} = ${table.scoutPayoutCents} + ${table.platformFeeCents}`),
@@ -631,6 +642,7 @@ export const notifications = pgTable("notifications", {
   channel: notificationChannel("channel").notNull().default("in_app"),
   status: notificationStatus("status").notNull().default("pending"),
   kind: text("kind").notNull(),
+  dedupeKey: text("dedupe_key"),
   title: text("title").notNull(),
   body: text("body").notNull(),
   actionLabel: text("action_label"),
@@ -638,6 +650,7 @@ export const notifications = pgTable("notifications", {
   providerMessageId: text("provider_message_id"),
   error: text("error"),
   attemptCount: integer("attempt_count").notNull().default(0),
+  providerAttemptStartedAt: timestamp("provider_attempt_started_at", { withTimezone: true }),
   lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   sentAt: timestamp("sent_at", { withTimezone: true }),
@@ -645,7 +658,17 @@ export const notifications = pgTable("notifications", {
 }, (table) => [
   index("notifications_recipient_idx").on(table.recipientUserId),
   index("notifications_mission_idx").on(table.missionId),
+  uniqueIndex("notifications_dedupe_key_idx").on(table.dedupeKey),
 ]);
+
+export const sentMessageEvents = pgTable("sent_message_events", {
+  messageId: text("message_id").primaryKey(),
+  status: text("status").notNull(),
+  error: text("error"),
+  receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const payments = pgTable("payments", {
   id: uuid("id").defaultRandom().primaryKey(),

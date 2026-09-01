@@ -1,7 +1,13 @@
-import { eq } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { notifications, users } from "@/db/schema";
-import { normalizeE164, verifySentWebhook } from "@/lib/sent";
+import { users } from "@/db/schema";
+import { recordSentMessageEvent } from "@/lib/sent-delivery-events";
+import {
+  normalizeE164,
+  normalizeSentMessageStatus,
+  normalizeSentWebhookEvent,
+  verifySentWebhook,
+} from "@/lib/sent";
 
 export const runtime = "nodejs";
 
@@ -33,15 +39,11 @@ export async function POST(request: Request) {
   catch { return Response.json({ error: "Invalid JSON." }, { status: 400 }); }
 
   const db = getDb();
-  const eventType = event.type ?? event.event ?? "";
+  const eventType = normalizeSentWebhookEvent(event.event ?? event.type);
   const messageId = event.payload?.message_id;
-  const status = event.payload?.message_status ?? eventType.replace("message.", "");
+  const status = normalizeSentMessageStatus(event.payload?.message_status ?? eventType);
   if (messageId && eventType !== "message.received") {
-    if (["sent", "delivered", "read"].includes(status)) {
-      await db.update(notifications).set({ status: "sent", sentAt: new Date(), error: null }).where(eq(notifications.providerMessageId, messageId));
-    } else if (["failed", "blocked", "filtered"].includes(status)) {
-      await db.update(notifications).set({ status: "failed", error: `Sent reported ${status}.` }).where(eq(notifications.providerMessageId, messageId));
-    }
+    await recordSentMessageEvent(messageId, status);
   }
 
   if (eventType === "message.received") {
@@ -49,11 +51,17 @@ export async function POST(request: Request) {
     const keyword = event.payload?.text?.trim().toUpperCase();
     if (contact && keyword) {
       const rows = await db.select({ id: users.id, phone: users.phone, consentedAt: users.smsConsentedAt }).from(users);
-      const user = rows.find((row) => normalizeE164(row.phone) === contact);
-      if (user && ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(keyword)) {
-        await db.update(users).set({ smsNotificationsEnabled: false, updatedAt: new Date() }).where(eq(users.id, user.id));
-      } else if (user && ["START", "UNSTOP", "SUBSCRIBE"].includes(keyword)) {
-        await db.update(users).set({ smsNotificationsEnabled: true, smsConsentedAt: user.consentedAt ?? new Date(), updatedAt: new Date() }).where(eq(users.id, user.id));
+      const matchingUserIds = rows.filter((row) => normalizeE164(row.phone) === contact).map((row) => row.id);
+      if (matchingUserIds.length && ["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(keyword)) {
+        await db.update(users).set({ smsNotificationsEnabled: false, updatedAt: new Date() })
+          .where(inArray(users.id, matchingUserIds));
+      } else if (matchingUserIds.length && ["START", "UNSTOP", "SUBSCRIBE"].includes(keyword)) {
+        const now = new Date();
+        await db.update(users).set({
+          smsNotificationsEnabled: true,
+          smsConsentedAt: sql`COALESCE(${users.smsConsentedAt}, ${now})`,
+          updatedAt: now,
+        }).where(inArray(users.id, matchingUserIds));
       }
     }
   }

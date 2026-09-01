@@ -7,8 +7,8 @@ import {
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
 import { MobileDashboardNav } from "./mobile-dashboard-nav";
-import { ScoutPayoutRequiredBanner } from "./scout-payout-required-banner";
-import { ScoutHandbookRequiredBanner } from "./scout-handbook-required-banner";
+import { ScoutOnboardingProgressTracker } from "./scout-onboarding-progress";
+import type { ScoutOnboardingProgress } from "@/lib/scout-onboarding-progress";
 
 type Role = "customer" | "scout";
 type MissionKind = "see" | "move" | "meet";
@@ -44,6 +44,7 @@ export function Dashboard({
   showScoutBanner = true,
   scoutPayoutReady = true,
   scoutHandbookAccepted = true,
+  scoutOnboardingProgress = null,
 }: {
   role: Role;
   userName: string;
@@ -54,6 +55,7 @@ export function Dashboard({
   showScoutBanner?: boolean;
   scoutPayoutReady?: boolean;
   scoutHandbookAccepted?: boolean;
+  scoutOnboardingProgress?: ScoutOnboardingProgress | null;
 }) {
   const scout = role === "scout";
   const scoutMission = scout
@@ -93,7 +95,7 @@ export function Dashboard({
               : <Link className="button" href="/request">New mission <IconPlus size={19} /></Link>}
           </div>
           {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div><Link href={notifications[0].missionId ? `/dashboard/missions/${notifications[0].missionId}` : "/dashboard/notifications"}>{notifications[0].missionId ? "Open" : "View all"} <IconArrowRight size={17} /></Link></section>}
-          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} scoutPayoutReady={scoutPayoutReady} scoutHandbookAccepted={scoutHandbookAccepted} /> : <CustomerOverview missions={missions} />}
+          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} scoutPayoutReady={scoutPayoutReady} scoutHandbookAccepted={scoutHandbookAccepted} scoutOnboardingProgress={scoutOnboardingProgress} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
     </main>
@@ -121,7 +123,7 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
   </>;
 }
 
-function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutReady, scoutHandbookAccepted }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean; scoutPayoutReady: boolean; scoutHandbookAccepted: boolean }) {
+function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutReady, scoutHandbookAccepted, scoutOnboardingProgress }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean; scoutPayoutReady: boolean; scoutHandbookAccepted: boolean; scoutOnboardingProgress: ScoutOnboardingProgress | null }) {
   const canBrowseOpen = ["applicant", "review", "approved"].includes(profileStatus);
   const available = missions.filter((mission) => mission.status === "open" && !mission.assigned);
   const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
@@ -129,9 +131,8 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutRe
   const missionBoard = [...active, ...available];
   const earned = completed.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
-    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : profileStatus === "paused" ? "Scout access paused" : profileStatus === "rejected" ? "Application status" : "Founding Scout application"}</strong><p>{profileStatus === "paused" ? "New opportunities are hidden while Control Room reviews your account. Assigned work remains available." : profileStatus === "rejected" ? "This application is not eligible for new mission opportunities. Contact support if you believe this is an error." : profileStatus === "approved" ? !scoutHandbookAccepted ? "You can browse matching missions now. Review the Scout Handbook before claiming one." : scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "You can browse matching missions now. Finish payout setup before claiming one." : "Your application is saved. You can browse matching opportunities while finishing the requirements to claim."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
-    {canBrowseOpen && !scoutHandbookAccepted && <ScoutHandbookRequiredBanner />}
-    {canBrowseOpen && !scoutPayoutReady && <ScoutPayoutRequiredBanner applicationApproved={profileStatus === "approved"} />}
+    {showScoutBanner && ["approved", "paused", "rejected"].includes(profileStatus) && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : profileStatus === "paused" ? "Scout access paused" : "Application status"}</strong><p>{profileStatus === "paused" ? "New opportunities are hidden while Control Room reviews your account. Assigned work remains available." : profileStatus === "rejected" ? "This application is not eligible for new mission opportunities. Contact support if you believe this is an error." : !scoutHandbookAccepted ? "You can browse matching missions now. Review the Scout Handbook before claiming one." : scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "You can browse matching missions now. Finish setup before claiming one."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
+    {canBrowseOpen && !["paused", "rejected"].includes(profileStatus) && scoutOnboardingProgress && <ScoutOnboardingProgressTracker progress={scoutOnboardingProgress} />}
     <div className="stat-grid scout-stats">
       <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note={profileStatus === "paused" || profileStatus === "rejected" ? "New opportunities are hidden" : "Open missions in your area"} />
       <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />

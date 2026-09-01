@@ -8,6 +8,7 @@ import { getDb } from "@/db";
 import { scoutHandbookAcceptances, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { alertScoutToOpenMissions } from "@/lib/notifications";
+import { tryAutoApproveScout } from "@/lib/scout-auto-approval";
 import { hasCurrentScoutHandbookAcceptance, SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 
 export async function acceptScoutHandbook(formData: FormData) {
@@ -23,7 +24,10 @@ export async function acceptScoutHandbook(formData: FormData) {
     handbookAcceptedAt: scoutProfiles.handbookAcceptedAt,
   }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1);
   if (!profile) throw new Error("Complete your Scout profile before acknowledging the Scout Handbook.");
-  if (hasCurrentScoutHandbookAcceptance(profile)) redirect(safeScoutReturnPath(formData.get("next")));
+  if (hasCurrentScoutHandbookAcceptance(profile)) {
+    await tryAutoApproveScout(user.id);
+    redirect(safeScoutReturnPath(formData.get("next")));
+  }
 
   const now = new Date();
   const requestHeaders = await headers();
@@ -41,6 +45,7 @@ export async function acceptScoutHandbook(formData: FormData) {
       updatedAt: now,
     }).where(eq(scoutProfiles.userId, user.id)),
   ]);
+  await tryAutoApproveScout(user.id);
 
   revalidatePath("/dashboard/scout");
   revalidatePath("/dashboard/scout/missions");

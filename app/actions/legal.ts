@@ -7,6 +7,7 @@ import { getDb } from "@/db";
 import { legalAcceptances, users } from "@/db/schema";
 import { requireAuthenticatedAppUser } from "@/lib/app-user";
 import { LEGAL_VERSION, POLICIES_VERSION, PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
+import { tryAutoApproveScout } from "@/lib/scout-auto-approval";
 
 export async function acceptLegalTerms(formData: FormData) {
   const user = await requireAuthenticatedAppUser("customer");
@@ -32,6 +33,7 @@ export async function acceptLegalTerms(formData: FormData) {
     }).onConflictDoNothing(),
     db.update(users).set({ legalVersion: LEGAL_VERSION, legalAcceptedAt: now, updatedAt: now }).where(eq(users.id, user.id)),
   ]);
+  if (user.role === "scout") await tryAutoApproveScout(user.id);
 
   redirect(user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer");
 }

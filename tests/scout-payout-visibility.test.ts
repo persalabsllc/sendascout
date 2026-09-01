@@ -13,11 +13,11 @@ const missionWorkspace = readFileSync(new URL("../components/mission-workspace.t
 
 test("Scout dashboard exposes matching missions while Stripe readiness gates claiming", () => {
   assert.match(scoutDashboardPage, /const payoutReady = scoutConnectReady\(profile, stripeLivemode\)/);
-  assert.match(scoutDashboardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(scoutDashboardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(user, profile\)/);
   assert.match(scoutDashboardPage, /canBrowseOpen[\s\S]*eq\(missions\.status, "open"\)[\s\S]*eq\(missions\.paymentStatus, "paid"\)/);
   assert.match(scoutDashboardPage, /scoutPayoutReady=\{payoutReady\}/);
-  assert.match(dashboard, /canBrowseOpen && !scoutPayoutReady && <ScoutPayoutRequiredBanner/);
-  assert.match(dashboard, /Finish payout setup before claiming one\./);
+  assert.match(dashboard, /canBrowseOpen && !\["paused", "rejected"\]\.includes\(profileStatus\) && scoutOnboardingProgress && <ScoutOnboardingProgressTracker/);
+  assert.match(dashboard, /Finish setup before claiming one\./);
 });
 
 test("Refreshing Stripe status immediately refreshes both Scout mission surfaces", () => {
@@ -33,7 +33,7 @@ test("A legacy approved Scout receives existing mission alerts when payouts beco
 
 test("Mission Board makes an incomplete payout account an explicit claim blocker", () => {
   assert.match(missionBoardPage, /const payoutReady = scoutConnectReady\(profile, stripeLivemode\)/);
-  assert.match(missionBoardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(missionBoardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(user, profile\)/);
   assert.match(missionBoardPage, /canBrowseOpen && !payoutReady && <ScoutPayoutRequiredBanner/);
   assert.doesNotMatch(missionBoardPage, /before open missions appear/i);
   assert.match(payoutBanner, /href="\/dashboard\/scout\/earnings"/);

@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
   let allowed = mission.customerId === user.id || mission.scoutId === user.id || user.role === "admin";
   let planningPrecision = 3;
-  if (!allowed && user.role === "scout" && mission.status === "open" && mission.paymentStatus === "paid" && (!bundle || bundle.paymentStatus === "paid") && !mission.scoutId) {
+  if (!allowed && user.role === "scout" && user.status === "active" && mission.status === "open" && mission.paymentStatus === "paid" && (!bundle || bundle.paymentStatus === "paid") && !mission.scoutId) {
     const [[profile], itinerary] = await Promise.all([
       db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
       mission.bundleId
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     allowed = Boolean(
       !privateFirstLook
       && profile
-      && scoutCanBrowseOpenMissions(profile)
+      && scoutCanBrowseOpenMissions(user, profile)
       && itinerary.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, profile)),
     );
     planningPrecision = profile?.status === "approved" ? 3 : 2;

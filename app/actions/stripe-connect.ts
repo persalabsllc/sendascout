@@ -2,24 +2,39 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { getDb } from "@/db";
 import { scoutProfiles } from "@/db/schema";
 import { requireAdminUser, requireAppUser } from "@/lib/app-user";
+import { isUnsupportedStripeEmbeddedBrowser } from "@/lib/stripe-connect-browser";
 import { createScoutStripeAccountLink, createScoutStripeDashboardLink, syncScoutStripeAccount, syncStripeAccountById, type ScoutPayoutOwnerType } from "@/lib/stripe-connect-service";
+import { logStripeConnectTelemetry } from "@/lib/stripe-connect-telemetry";
 
-type StripeLinkResult = { ok: true; url: string } | { ok: false; error: string };
+type StripeLinkResult = { ok: true; url: string } | { ok: false; error: string; reason?: "embedded_browser" };
 
 export async function startScoutStripeOnboarding(payoutOwnerType?: ScoutPayoutOwnerType): Promise<StripeLinkResult> {
+  let userId: string | null = null;
   try {
     const user = await requireAppUser("scout");
+    userId = user.id;
     if (user.role !== "scout") throw new Error("Only Scout accounts can set up payouts.");
     if (payoutOwnerType !== undefined && payoutOwnerType !== "individual" && payoutOwnerType !== "company") {
       throw new Error("Choose a valid payout account type.");
     }
+    const requestHeaders = await headers();
+    if (isUnsupportedStripeEmbeddedBrowser(requestHeaders.get("user-agent"))) {
+      logStripeConnectTelemetry("start_blocked_embedded_browser", { userId, source: "start" });
+      return {
+        ok: false,
+        reason: "embedded_browser",
+        error: "Open Send a Scout in Safari or Chrome to finish secure Stripe setup.",
+      };
+    }
     return { ok: true, url: await createScoutStripeAccountLink(user.id, payoutOwnerType) };
   } catch (error) {
     unstable_rethrow(error);
+    logStripeConnectTelemetry("start_failed", { userId, source: "start" });
     console.error("Scout Stripe onboarding could not start", error);
     return { ok: false, error: "Stripe payout setup could not start. Please try again or contact support." };
   }

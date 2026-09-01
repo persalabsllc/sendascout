@@ -20,9 +20,9 @@ test("only a first success that is already ineligible receives the late-refund m
   assert.match(paymentService, /WHEN candidate\.kind = 'tip'/);
 });
 
-test("successful payment audit binds a typed preferred-scout boolean", () => {
-  assert.match(paymentService, /const hasPreferredScout = row\.mission\.preferredScoutId !== null;/);
-  assert.match(paymentService, /CASE WHEN \$\{hasPreferredScout\}/);
+test("successful payment audit follows the preferred Scout revalidation result", () => {
+  assert.match(paymentService, /preferred_scout_readiness AS MATERIALIZED/);
+  assert.match(paymentService, /CASE WHEN EXISTS \(SELECT 1 FROM preferred_scout_readiness\)/);
   assert.doesNotMatch(paymentService, /CASE WHEN \$\{row\.mission\.preferredScoutId\} IS NULL/);
 });
 

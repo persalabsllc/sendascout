@@ -2,6 +2,50 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export type SentMode = "disabled" | "sandbox" | "live";
 
+type SentSmsProviderErrorOptions = {
+  httpStatus: number | null;
+  providerCode?: string | null;
+  ambiguous?: boolean;
+  cause?: unknown;
+};
+
+/**
+ * Preserves Sent's HTTP and machine-readable error details so notification
+ * workers can distinguish a safe retry from a definite request rejection.
+ */
+export class SentSmsProviderError extends Error {
+  readonly httpStatus: number | null;
+  readonly providerCode: string | null;
+  readonly retryable: boolean;
+
+  constructor(message: string, options: SentSmsProviderErrorOptions) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "SentSmsProviderError";
+    this.httpStatus = options.httpStatus;
+    this.providerCode = options.providerCode ?? null;
+    this.retryable = Boolean(
+      options.ambiguous
+      || options.httpStatus === null
+      || options.httpStatus === 408
+      || options.httpStatus === 429
+      || options.httpStatus >= 500
+      || (options.httpStatus === 409 && options.providerCode === "CONFLICT_001"),
+    );
+  }
+}
+
+export function isSentSmsErrorRetryable(error: unknown) {
+  return error instanceof SentSmsProviderError && error.retryable;
+}
+
+export function normalizeSentWebhookEvent(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+export function normalizeSentMessageStatus(value: string | null | undefined) {
+  return normalizeSentWebhookEvent(value).replace(/^message\./, "");
+}
+
 export function getSentMode(): SentMode {
   const value = process.env.SENT_DM_SMS_MODE?.toLowerCase();
   return value === "sandbox" || value === "live" ? value : "disabled";
@@ -26,6 +70,7 @@ export function normalizeE164(value: string | null | undefined) {
 
 export async function sendSentSms(input: {
   notificationId: string;
+  attempt?: number;
   to: string;
   title: string;
   body: string;
@@ -38,34 +83,56 @@ export async function sendSentSms(input: {
   const to = normalizeE164(input.to);
   if (!to) throw new Error("The recipient does not have a valid mobile number.");
 
-  const response = await fetch("https://api.sent.dm/v3/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "Idempotency-Key": `sendascout-${input.notificationId}`,
-    },
-    body: JSON.stringify({
-      to: [to],
-      channel: ["sms"],
-      template: {
-        id: templateId,
-        parameters: {
-          title: input.title,
-          body: input.body,
-          action_url: input.actionUrl ?? "https://sendascout.com/dashboard",
-        },
+  let response: Response;
+  try {
+    response = await fetch("https://api.sent.dm/v3/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "Idempotency-Key": `sendascout-${input.notificationId}-attempt-${input.attempt ?? 1}`,
       },
-      sandbox: mode === "sandbox",
-    }),
-  });
+      body: JSON.stringify({
+        to: [to],
+        channel: ["sms"],
+        template: {
+          id: templateId,
+          parameters: {
+            title: input.title,
+            body: input.body,
+            action_url: input.actionUrl ?? "https://sendascout.com/dashboard",
+          },
+        },
+        sandbox: mode === "sandbox",
+      }),
+    });
+  } catch (error) {
+    throw new SentSmsProviderError("Sent SMS delivery did not return a response.", {
+      httpStatus: null,
+      ambiguous: true,
+      cause: error,
+    });
+  }
   const result = await response.json().catch(() => null) as {
     data?: { recipients?: Array<{ message_id?: string }> };
     message?: string;
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   } | null;
   const messageId = result?.data?.recipients?.[0]?.message_id;
-  if (!response.ok || !messageId) throw new Error(result?.error?.message || result?.message || `Sent rejected the message (${response.status}).`);
+  const providerCode = result?.error?.code ?? null;
+  if (!response.ok) {
+    throw new SentSmsProviderError(result?.error?.message || result?.message || `Sent rejected the message (${response.status}).`, {
+      httpStatus: response.status,
+      providerCode,
+    });
+  }
+  if (!messageId) {
+    throw new SentSmsProviderError("Sent returned an ambiguous response without a message ID.", {
+      httpStatus: response.status,
+      providerCode,
+      ambiguous: true,
+    });
+  }
   return messageId;
 }
 

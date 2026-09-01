@@ -3,8 +3,16 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { missionRecurrences, missions } from "@/db/schema";
 import { nextRecurrenceDate } from "@/lib/mission-features";
-import { alertEligibleScouts, notifyUser } from "@/lib/notifications";
+import {
+  alertEligibleScouts,
+  notifyUser,
+  reconcileClaimedMissionNotifications,
+  reconcileOpenMissionAlerts,
+} from "@/lib/notifications";
 import { reportException, runOperationalHealthChecks } from "@/lib/observability";
+import { reconcileScoutAutoApprovals } from "@/lib/scout-auto-approval";
+import { runScoutOnboardingReminders, runScoutOnboardingWelcomes } from "@/lib/scout-onboarding-reminders";
+import { reconcileStoredSentMessageEvents } from "@/lib/sent-delivery-events";
 import { reconcileScoutPayoutReadiness } from "@/lib/stripe-connect-service";
 import { reconcileLatePaymentRefunds } from "@/lib/stripe-late-payment-refunds";
 import { reconcileAmbiguousOffSessionPayments, reconcilePendingTipPayments } from "@/lib/stripe-payment-addons";
@@ -25,6 +33,16 @@ import {
 
 export const maxDuration = 300;
 
+async function runHourlyStage<T>(stage: string, operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown hourly stage error";
+    console.error("Independent hourly stage failed", { stage, error: message });
+    return { stage, errors: 1, error: message };
+  }
+}
+
 export async function GET(request: Request) {
   const startedAt = Date.now();
   const requestId = request.headers.get("x-vercel-id") ?? crypto.randomUUID();
@@ -34,6 +52,18 @@ export async function GET(request: Request) {
   console.log(JSON.stringify({ level: "info", message: "hourly operations started", route: "/api/cron/auto-complete", requestId }));
   try {
     const db = getDb();
+    // Scout guidance runs first and each stage is isolated. A malformed mission,
+    // recurrence, payment, or provider record later in this job cannot starve
+    // onboarding emails for every applicant.
+    const payoutReadinessReconciliation = await runHourlyStage("scout_payout_readiness", () => reconcileScoutPayoutReadiness());
+    const scoutAutoApprovalReconciliation = await runHourlyStage("scout_auto_approval", () => reconcileScoutAutoApprovals());
+    const scoutOnboardingWelcomes = await runHourlyStage("scout_onboarding_welcomes", () => runScoutOnboardingWelcomes());
+    const scoutOnboardingReminders = await runHourlyStage("scout_onboarding_reminders", () => runScoutOnboardingReminders());
+    const sentDeliveryReconciliation = await runHourlyStage("sent_delivery_events", () => reconcileStoredSentMessageEvents());
+    const claimedMissionNotificationReconciliation = await runHourlyStage(
+      "claimed_mission_notifications",
+      () => reconcileClaimedMissionNotifications(),
+    );
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const pending = await db.select().from(missions).where(and(sql`${missions.archivedAt} IS NULL`, eq(missions.status, "submitted"), lte(missions.submittedAt, cutoff)));
     let completed = 0;
@@ -114,16 +144,37 @@ export async function GET(request: Request) {
     ));
     let preferredBroadcasts = 0;
     for (const candidate of preferredReleases) {
-      const [released] = await db.update(missions).set({ preferredScoutBroadcastAt: now, updatedAt: now }).where(and(
-        eq(missions.id, candidate.id),
-        eq(missions.status, "open"),
-        eq(missions.paymentStatus, "paid"),
-        isNull(missions.preferredScoutBroadcastAt),
-      )).returning({ id: missions.id });
+      const releaseResult = await db.execute<{ id: string }>(sql`
+        WITH released AS (
+          UPDATE missions AS mission
+          SET preferred_scout_broadcast_at = ${now},
+              preferred_scout_broadcast_generation = mission.alert_generation + 1,
+              alert_generation = mission.alert_generation + 1,
+              updated_at = ${now}
+          WHERE mission.id = ${candidate.id}
+            AND mission.status = 'open'
+            AND mission.payment_status = 'paid'
+            AND mission.preferred_scout_broadcast_at IS NULL
+          RETURNING mission.id
+        ), audited AS (
+          INSERT INTO mission_updates (mission_id, status, message, evidence_kind)
+          SELECT released.id, 'open'::mission_status,
+            'The preferred Scout first-look window ended. Mission published to eligible Scouts.',
+            'mission_publication'
+          FROM released
+          RETURNING mission_id
+        )
+        SELECT released.id
+        FROM released
+        WHERE (SELECT COUNT(*) FROM audited) = 1
+      `);
+      const released = releaseResult.rows[0];
       if (!released) continue;
       await alertEligibleScouts(released.id);
       preferredBroadcasts += 1;
     }
+
+    const openMissionAlertReconciliation = await reconcileOpenMissionAlerts();
 
     const dueRecurrences = await db.select().from(missionRecurrences).where(and(
       eq(missionRecurrences.status, "active"),
@@ -174,7 +225,6 @@ export async function GET(request: Request) {
         recurringReminders += 1;
       }
     }
-    const payoutReadinessReconciliation = await reconcileScoutPayoutReadiness();
     const settledTransferReconciliation = await reconcileSettledPaymentTransfers();
     const cancelledCheckoutReconciliation = await reconcileCancelledMissionCheckouts();
     const pendingTipReconciliation = await reconcilePendingTipPayments();
@@ -189,8 +239,8 @@ export async function GET(request: Request) {
     const settlementReconciliation = await reconcileCompletedMissionSettlements();
     const transfers = await processPendingPaymentTransfers();
     const health = await runOperationalHealthChecks();
-    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
-    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
+    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, openMissionAlertReconciliation, recurringReminders, payoutReadinessReconciliation, scoutAutoApprovalReconciliation, scoutOnboardingWelcomes, scoutOnboardingReminders, sentDeliveryReconciliation, claimedMissionNotificationReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
+    return NextResponse.json({ ok: true, completed, preferredBroadcasts, openMissionAlertReconciliation, recurringReminders, payoutReadinessReconciliation, scoutAutoApprovalReconciliation, scoutOnboardingWelcomes, scoutOnboardingReminders, sentDeliveryReconciliation, claimedMissionNotificationReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
   } catch (error) {
     await reportException(error, { route: "/api/cron/auto-complete", requestId, durationMs: Date.now() - startedAt });
     return NextResponse.json({ ok: false, error: "Operations check failed." }, { status: 500 });
