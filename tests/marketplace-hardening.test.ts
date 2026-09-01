@@ -10,6 +10,7 @@ import {
   remainingCaseAdjustmentCents,
 } from "../lib/mission-operations.ts";
 import { meetActionIsAvailable, meetActionOpensAt } from "../lib/mission-timing.ts";
+import { SCOUT_HANDBOOK_VERSION } from "../lib/scout-handbook.ts";
 import { scoutApprovalChecklist, scoutReadyForApproval, type ScoutApprovalInput } from "../lib/scout-approval.ts";
 import { scoutConnectReady } from "../lib/stripe-connect.ts";
 
@@ -87,6 +88,8 @@ const readyScout: ScoutApprovalInput = {
   lastName: "Scout",
   phone: "252-555-0100",
   legalVersion: "current",
+  handbookVersion: SCOUT_HANDBOOK_VERSION,
+  handbookAcceptedAt: new Date(),
   identityCheck: "clear",
   identityVerifiedName: "Kyle Scout",
   identityVerifiedAt: new Date(),
@@ -110,6 +113,16 @@ test("Scout approval requires every trust and profile check", () => {
   const incomplete = { ...readyScout, headshotPath: null, identityCheck: "pending", legalVersion: "old" };
   assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
   assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["identity", "terms", "headshot"]);
+});
+
+test("Scout approval requires the current handbook acknowledgement", () => {
+  const incomplete = { ...readyScout, handbookVersion: "2026-08-01-v0", handbookAcceptedAt: new Date() };
+  assert.equal(scoutReadyForApproval(incomplete, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(incomplete, "current", false).filter((item) => !item.complete).map((item) => item.key), ["handbook"]);
+
+  const missingTimestamp = { ...readyScout, handbookAcceptedAt: null };
+  assert.equal(scoutReadyForApproval(missingTimestamp, "current", false), false);
+  assert.deepEqual(scoutApprovalChecklist(missingTimestamp, "current", false).filter((item) => !item.complete).map((item) => item.key), ["handbook"]);
 });
 
 test("Scout approval requires a transfer-ready Stripe account", () => {

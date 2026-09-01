@@ -1,8 +1,12 @@
+import { hasCurrentScoutHandbookAcceptance } from "./scout-handbook.ts";
+
 export type ScoutApprovalInput = {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
   legalVersion: string | null;
+  handbookVersion: string | null;
+  handbookAcceptedAt: Date | null;
   identityCheck: string;
   identityVerifiedName: string | null;
   identityVerifiedAt: Date | null;
@@ -27,6 +31,7 @@ export function scoutApprovalChecklist(input: ScoutApprovalInput, currentLegalVe
   return [
     { key: "identity", label: "Government ID and verified legal name recorded", complete: input.identityCheck === "clear" && Boolean(input.identityVerifiedName?.trim() && input.identityVerifiedAt) },
     { key: "terms", label: "Current marketplace terms accepted", complete: input.legalVersion === currentLegalVersion },
+    { key: "handbook", label: "Current Scout Handbook acknowledged", complete: hasCurrentScoutHandbookAcceptance(input) },
     { key: "name", label: "First and last legal name provided", complete: Boolean(input.firstName?.trim() && input.lastName?.trim()) },
     { key: "phone", label: "Mobile number provided", complete: (input.phone?.replace(/\D/g, "").length ?? 0) >= 10 },
     { key: "headshot", label: "Current profile headshot uploaded", complete: Boolean(input.headshotPath) },

@@ -5,6 +5,7 @@ import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { computeDrivingRoute } from "@/lib/google-maps";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 
@@ -35,7 +36,14 @@ export async function GET(request: Request) {
       && leg.preferredScoutExclusiveUntil
       && leg.preferredScoutExclusiveUntil.getTime() > Date.now(),
     ));
-    allowed = Boolean(!privateFirstLook && profile && profile.status === "approved" && scoutConnectReady(profile, getStripeLivemode()) && itinerary.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, profile)));
+    allowed = Boolean(
+      !privateFirstLook
+      && profile
+      && hasCurrentScoutHandbookAcceptance(profile)
+      && profile.status === "approved"
+      && scoutConnectReady(profile, getStripeLivemode())
+      && itinerary.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, profile)),
+    );
   }
   if (!allowed) return NextResponse.json({ error: "You cannot view this mission map." }, { status: 403 });
 

@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, or, isNotNull, isNull, sql } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 
@@ -55,6 +56,10 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       )` }).from(missions).where(inArray(missions.id, itinerary.map((leg) => leg.id))),
     ]);
     if (!profile || profile.status !== "approved" || !scoutConnectReady(profile, getStripeLivemode()) || itinerary.some((leg) => leg.paymentStatus !== "paid") || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
+    if (!hasCurrentScoutHandbookAcceptance(profile)) {
+      const currentPath = `/dashboard/missions/${encodeURIComponent(id)}`;
+      redirect(`/dashboard/scout/handbook?next=${encodeURIComponent(currentPath)}`);
+    }
     role = "scout";
     canClaim = true;
   } else notFound();

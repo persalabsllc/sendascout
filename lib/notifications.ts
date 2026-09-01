@@ -1,7 +1,8 @@
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { missionBundles, missions, notifications, scoutProfiles, users } from "@/db/schema";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 import { isSentConfigured, sendSentSms } from "@/lib/sent";
 import { getStripeLivemode } from "@/lib/stripe";
 
@@ -289,6 +290,8 @@ export async function alertEligibleScouts(missionId: string) {
   }).from(scoutProfiles).innerJoin(users, eq(users.id, scoutProfiles.userId))
     .where(and(
       eq(scoutProfiles.status, "approved"),
+      eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
+      isNotNull(scoutProfiles.handbookAcceptedAt),
       eq(scoutProfiles.stripeAccountLivemode, stripeLivemode),
       eq(scoutProfiles.stripeConnectStatus, "ready"),
       eq(scoutProfiles.stripeTransfersActive, true),
@@ -324,6 +327,8 @@ export async function alertScoutToOpenMissions(scoutUserId: string) {
     eq(users.id, scoutUserId),
     eq(users.status, "active"),
     eq(scoutProfiles.status, "approved"),
+    eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
+    isNotNull(scoutProfiles.handbookAcceptedAt),
     eq(scoutProfiles.stripeAccountLivemode, stripeLivemode),
     eq(scoutProfiles.stripeConnectStatus, "ready"),
     eq(scoutProfiles.stripeTransfersActive, true),

@@ -923,3 +923,129 @@ button, input, textarea, select { font: inherit; }
   .legal-accept-page > header { align-items: flex-start; gap: 16px; }
   .legal-accept-form .button { width: 100%; }
 }
+
+/* Scout handbook */
+.handbook-document { width: 100%; overflow: hidden; border: 1px solid #dce6e5; border-radius: 24px; background: white; color: var(--ink); box-shadow: 0 20px 55px rgba(8,43,69,.07); }
+.handbook-document-reader { border: 0; border-radius: 0; box-shadow: none; }
+.handbook-document-header { position: relative; display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: clamp(25px, 4vw, 42px); overflow: hidden; background: radial-gradient(circle at 92% -15%, rgba(9,198,181,.18), transparent 36%), linear-gradient(135deg, #f6fcfb, #fff9f4); border-bottom: 1px solid #e5eceb; }
+.handbook-document-header:after { content: ""; position: absolute; width: 210px; height: 210px; right: -125px; bottom: -150px; border: 1px dashed rgba(9,198,181,.4); border-radius: 50%; pointer-events: none; }
+.handbook-document-mark { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 18px; background: var(--navy); color: #70e8dc; box-shadow: 0 12px 25px rgba(8,43,69,.16); }
+.handbook-document-header > div { min-width: 0; }
+.handbook-document-header h2 { margin: 7px 0 5px; color: var(--navy); font-size: clamp(27px, 4vw, 38px); line-height: 1.05; letter-spacing: -1.6px; }
+.handbook-document-header > div > p { max-width: 590px; margin: 0; color: #63777f; font-size: 12px; line-height: 1.65; }
+.handbook-document-meta { position: relative; z-index: 1; min-width: 172px; display: grid; gap: 3px; margin: 0; padding: 13px 15px; border: 1px solid rgba(8,43,69,.09); border-radius: 13px; background: rgba(255,255,255,.78); box-shadow: 0 8px 20px rgba(8,43,69,.05); }
+.handbook-document-meta strong { color: var(--navy); font-size: 9px; letter-spacing: .65px; text-transform: uppercase; }
+.handbook-document-meta span { color: #008c7d; font-size: 11px; font-weight: 850; }
+.handbook-document-meta time { color: #7e8e94; font-size: 8px; }
+.handbook-principles { padding: 28px clamp(22px, 4vw, 42px) 32px; border-bottom: 1px solid #e8eeee; background: #fbfdfc; }
+.handbook-principles-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.handbook-principles-heading > span { color: var(--coral); font-size: 9px; font-weight: 900; letter-spacing: .9px; text-transform: uppercase; }
+.handbook-principles-heading h3 { margin: 0; color: var(--navy); font-size: 15px; }
+.handbook-principles-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; }
+.handbook-principles-grid article { min-width: 0; padding: 14px; border: 1px solid #e1e9e8; border-radius: 14px; background: white; }
+.handbook-principles-grid article > span { width: 33px; height: 33px; display: grid; place-items: center; margin-bottom: 10px; border-radius: 10px; background: #e7f8f5; color: #008f81; }
+.handbook-principles-grid strong { display: block; margin-bottom: 4px; color: var(--navy); font-size: 10px; }
+.handbook-principles-grid p { margin: 0; color: #73858c; font-size: 8px; line-height: 1.5; }
+.handbook-section-list { padding: 7px clamp(22px, 4vw, 42px) 14px; }
+.handbook-section { scroll-margin-top: 24px; padding: 29px 0; border-bottom: 1px solid #edf1f1; }
+.handbook-section:last-child { border-bottom: 0; }
+.handbook-section > header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.handbook-section-number { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; background: #fff0eb; color: var(--coral); font-size: 9px; font-weight: 900; letter-spacing: .45px; }
+.handbook-section h3 { margin: 0; color: var(--navy); font-size: 19px; letter-spacing: -.35px; }
+.handbook-section > p { margin: 0 0 11px; color: #5c7078; font-size: 11px; line-height: 1.75; }
+.handbook-section > p:last-of-type { margin-bottom: 0; }
+.handbook-section ul { display: grid; gap: 8px; padding: 0; margin: 16px 0 0; list-style: none; }
+.handbook-section ul li { position: relative; padding-left: 24px; color: #5d7078; font-size: 10px; line-height: 1.65; }
+.handbook-section ul li:before { content: "✓"; position: absolute; top: 1px; left: 0; width: 16px; height: 16px; display: grid; place-items: center; border-radius: 50%; background: #e1f7f3; color: #008978; font-size: 9px; font-weight: 900; }
+.handbook-steps { counter-reset: handbook-step; display: grid; gap: 9px; padding: 0; margin: 16px 0 0; list-style: none; }
+.handbook-steps li { counter-increment: handbook-step; display: grid; grid-template-columns: 25px 1fr; gap: 9px; align-items: start; color: #5d7078; font-size: 10px; line-height: 1.65; }
+.handbook-steps li:before { content: counter(handbook-step); width: 23px; height: 23px; display: grid; place-items: center; border-radius: 8px; background: var(--navy); color: white; font-size: 8px; font-weight: 900; }
+.handbook-callout { display: grid; grid-template-columns: 25px 1fr; gap: 11px; align-items: start; margin-top: 18px; padding: 14px 16px; border: 1px solid #bfe6df; border-radius: 13px; background: #f1fbf9; color: #008879; }
+.handbook-callout-safety { border-color: #f2c8a6; background: #fff8ed; color: #bf672d; }
+.handbook-callout svg { margin-top: 1px; }
+.handbook-callout strong { display: block; margin-bottom: 3px; color: var(--navy); font-size: 10px; }
+.handbook-callout p { margin: 0; color: #62767d; font-size: 9px; line-height: 1.6; }
+.handbook-document-footer { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 14px; align-items: center; margin: 0 clamp(22px, 4vw, 42px) clamp(24px, 4vw, 42px); padding: 19px; border-radius: 16px; background: linear-gradient(135deg, var(--navy), var(--navy-2)); color: #65e3d6; }
+.handbook-document-footer > svg { justify-self: center; }
+.handbook-document-footer strong { display: block; margin-bottom: 3px; color: white; font-size: 11px; }
+.handbook-document-footer p { margin: 0; color: #bfd1d8; font-size: 9px; line-height: 1.6; }
+.handbook-document-footer a { color: #7aeee2; font-weight: 800; text-decoration: underline; text-underline-offset: 2px; }
+
+/* Required handbook reader used during onboarding and for version updates */
+.handbook-onboarding-layout { width: min(1100px, calc(100% - 40px)); display: grid; grid-template-columns: minmax(250px, 315px) minmax(0, 760px); gap: 28px; align-items: start; margin: 38px auto 70px; }
+.handbook-onboarding-summary { position: sticky; top: 24px; overflow: hidden; padding: 29px; border-radius: 23px; background: var(--navy); color: white; box-shadow: 0 20px 45px rgba(8,43,69,.14); }
+.handbook-onboarding-summary:after { content: ""; position: absolute; width: 190px; height: 190px; right: -110px; bottom: -115px; border-radius: 50%; background: var(--teal); opacity: .14; }
+.handbook-onboarding-summary > * { position: relative; z-index: 1; }
+.handbook-onboarding-summary h1 { margin: 12px 0 12px; color: white; font-size: clamp(28px, 3vw, 36px); line-height: 1.08; letter-spacing: -1.4px; }
+.handbook-onboarding-summary > p { margin: 0; color: #bed0d7; font-size: 11px; line-height: 1.7; }
+.handbook-required-pill { width: fit-content; display: inline-flex; align-items: center; gap: 6px; margin-top: 22px; padding: 7px 10px; border-radius: 999px; background: rgba(9,198,181,.14); color: #77ebe0; font-size: 8px; font-weight: 900; letter-spacing: .55px; text-transform: uppercase; }
+.handbook-reader-card { min-width: 0; overflow: hidden; border: 1px solid #dce6e5; border-radius: 23px; background: white; box-shadow: 0 20px 55px rgba(8,43,69,.08); }
+.handbook-reader-scroll { max-height: min(68vh, 760px); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scroll-behavior: smooth; }
+.handbook-reader-scroll:focus-visible { outline: 3px solid rgba(9,198,181,.3); outline-offset: -3px; }
+.handbook-reader-scroll::-webkit-scrollbar { width: 10px; }
+.handbook-reader-scroll::-webkit-scrollbar-track { background: #f1f5f4; }
+.handbook-reader-scroll::-webkit-scrollbar-thumb { border: 3px solid #f1f5f4; border-radius: 99px; background: #9ab7b4; }
+.handbook-reader-scroll .handbook-document { border: 0; border-radius: 0; box-shadow: none; }
+.handbook-acceptance-form { display: grid; gap: 14px; padding: 20px 24px 23px; border-top: 1px solid #dfe8e7; background: #fbfdfc; }
+.handbook-acceptance-check { display: grid; grid-template-columns: 21px minmax(0, 1fr); gap: 11px; align-items: start; padding: 15px; border: 1px solid #d7e3e1; border-radius: 13px; background: white; color: #536970; font-size: 10px; line-height: 1.62; cursor: pointer; transition: border-color .2s, background .2s, box-shadow .2s; }
+.handbook-acceptance-check:hover { border-color: #9ed9d1; }
+.handbook-acceptance-check:has(input:checked) { border-color: #83d8cc; background: #f2fbf9; box-shadow: 0 0 0 3px rgba(9,198,181,.08); }
+.handbook-acceptance-check input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--teal); }
+.handbook-acceptance-check span { min-width: 0; }
+.handbook-acceptance-form > small { color: #839298; font-size: 8px; line-height: 1.5; }
+.handbook-acceptance-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.handbook-acceptance-actions > span { color: #7e8d92; font-size: 8px; line-height: 1.45; }
+.handbook-acceptance-actions .button { flex: 0 0 auto; }
+
+/* Dashboard reminder shown until the current version is accepted */
+.handbook-required-card { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 15px; align-items: center; margin-bottom: 22px; padding: 18px; border: 1px solid #f0c8b9; border-radius: 16px; background: linear-gradient(135deg, #fff9f5, #fffdfb); }
+.handbook-required-card > span:first-child { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: #fff0eb; color: var(--coral); }
+.handbook-required-card strong { display: block; margin-bottom: 3px; color: var(--navy); font-size: 12px; }
+.handbook-required-card p { margin: 0; color: #74858b; font-size: 9px; line-height: 1.55; }
+.handbook-required-card .button { font-size: 10px; padding: 11px 14px; }
+
+@media (max-width: 900px) {
+  .handbook-document-header { grid-template-columns: 52px minmax(0, 1fr); }
+  .handbook-document-mark { width: 52px; height: 52px; border-radius: 16px; }
+  .handbook-document-meta { grid-column: 2; width: fit-content; min-width: min(100%, 240px); }
+  .handbook-principles-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .handbook-onboarding-layout { grid-template-columns: 1fr; width: min(760px, calc(100% - 30px)); margin-top: 22px; }
+  .handbook-onboarding-summary { position: relative; top: auto; }
+}
+
+@media (max-width: 620px) {
+  .handbook-document { border-radius: 18px; }
+  .handbook-document-reader { border-radius: 0; }
+  .handbook-document-header { grid-template-columns: 42px minmax(0, 1fr); gap: 12px; padding: 22px 18px; }
+  .handbook-document-mark { width: 42px; height: 42px; border-radius: 13px; }
+  .handbook-document-mark svg { width: 22px; height: 22px; }
+  .handbook-document-header h2 { font-size: 26px; letter-spacing: -1.2px; }
+  .handbook-document-meta { grid-column: 1 / -1; width: 100%; min-width: 0; }
+  .handbook-principles { padding: 23px 18px 25px; }
+  .handbook-principles-heading { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .handbook-principles-grid { grid-template-columns: 1fr; }
+  .handbook-principles-grid article { display: grid; grid-template-columns: 33px minmax(0, 1fr); column-gap: 10px; align-items: center; }
+  .handbook-principles-grid article > span { grid-row: 1 / 3; margin: 0; }
+  .handbook-section-list { padding-inline: 18px; }
+  .handbook-section { padding-block: 24px; }
+  .handbook-section h3 { font-size: 17px; }
+  .handbook-document-footer { grid-template-columns: 1fr; margin: 0 18px 24px; }
+  .handbook-document-footer > svg { justify-self: start; }
+  .handbook-onboarding-layout { width: min(100% - 24px, 760px); margin: 14px auto 40px; gap: 15px; }
+  .handbook-onboarding-summary { padding: 23px; border-radius: 18px; }
+  .handbook-reader-card { overflow: visible; border-radius: 18px; }
+  .handbook-reader-scroll { max-height: none; overflow: visible; }
+  .handbook-acceptance-form { padding: 18px; }
+  .handbook-acceptance-actions { align-items: stretch; flex-direction: column; }
+  .handbook-acceptance-actions .button { width: 100%; }
+  .handbook-required-card { grid-template-columns: 42px minmax(0, 1fr); }
+  .handbook-required-card > span:first-child { width: 42px; height: 42px; }
+  .handbook-required-card .button { grid-column: 2; width: fit-content; }
+}
+
+@media print {
+  .handbook-document { border: 0; box-shadow: none; }
+  .handbook-document-header, .handbook-principles { background: white; }
+  .handbook-section { break-inside: avoid; }
+  .handbook-reader-scroll { max-height: none; overflow: visible; }
+}

@@ -149,6 +149,8 @@ export const scoutProfiles = pgTable("scout_profiles", {
   stripeOnboardingCompletedAt: timestamp("stripe_onboarding_completed_at", { withTimezone: true }),
   stripePayoutScheduleConfiguredAt: timestamp("stripe_payout_schedule_configured_at", { withTimezone: true }),
   verificationConsentedAt: timestamp("verification_consented_at", { withTimezone: true }),
+  handbookVersion: text("handbook_version"),
+  handbookAcceptedAt: timestamp("handbook_accepted_at", { withTimezone: true }),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   rating: numeric("rating", { precision: 3, scale: 2 }),
   ratingCount: integer("rating_count").notNull().default(0),
@@ -164,7 +166,21 @@ export const scoutProfiles = pgTable("scout_profiles", {
   check("scout_profiles_stripe_api_version_check", sql`${table.stripeAccountApiVersion} IS NULL OR ${table.stripeAccountApiVersion} IN ('v1', 'v2')`),
   check("scout_profiles_stripe_identity_check", sql`(${table.stripeAccountId} IS NULL AND ${table.stripeAccountApiVersion} IS NULL) OR (${table.stripeAccountId} IS NOT NULL AND ${table.stripeAccountApiVersion} IS NOT NULL)`),
   check("scout_profiles_stripe_status_check", sql`${table.stripeConnectStatus} IN ('not_started', 'onboarding', 'pending', 'ready', 'restricted', 'disabled')`),
+  check("scout_profiles_handbook_acceptance_check", sql`(${table.handbookVersion} IS NULL AND ${table.handbookAcceptedAt} IS NULL) OR (${table.handbookVersion} IS NOT NULL AND ${table.handbookAcceptedAt} IS NOT NULL)`),
   check("scout_profiles_headshot_upload_count_check", sql`${table.headshotUploadCount} >= 0`),
+]);
+
+export const scoutHandbookAcceptances = pgTable("scout_handbook_acceptances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  handbookVersion: text("handbook_version").notNull(),
+  source: text("source").notNull(),
+  userAgent: text("user_agent"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [
+  uniqueIndex("scout_handbook_acceptances_user_version_idx").on(table.userId, table.handbookVersion),
+  index("scout_handbook_acceptances_user_idx").on(table.userId),
+  check("scout_handbook_acceptances_source_check", sql`${table.source} IN ('onboarding', 'dashboard')`),
 ]);
 
 export const businessAccounts = pgTable("business_accounts", {
