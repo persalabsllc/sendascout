@@ -197,9 +197,9 @@ export async function claimMission(id: string): Promise<Result> {
       if (mission.bundleSequence !== bundleContext.bundle.activeSequence || mission.status !== "open") {
         throw new Error("Only the active first part of this mission bundle can be claimed.");
       }
-      let claimedBundle: unknown;
+      let claimedBundle: { id: string } | undefined;
       try {
-        claimedBundle = await db.execute(sql`
+        const claimedBundleResult = await db.execute<{ id: string }>(sql`
         WITH locked_profile AS MATERIALIZED (
           UPDATE scout_profiles AS approved_profile
           SET updated_at = approved_profile.updated_at
@@ -284,10 +284,11 @@ export async function claimMission(id: string): Promise<Result> {
           ELSE (1 / ((SELECT COUNT(*)::integer FROM claimed_bundle) - (SELECT COUNT(*)::integer FROM claimed_bundle)))::text
         END AS id
         `);
+        claimedBundle = claimedBundleResult.rows[0];
       } catch {
         throw new Error("Another Scout claimed this mission first.");
       }
-      if ((claimedBundle as unknown as { id: string }[]).length === 0) throw new Error("Another Scout claimed this mission first.");
+      if (!claimedBundle?.id) throw new Error("Another Scout claimed this mission first.");
       await db.insert(missionUpdates).values(bundleContext.legs.map((leg) => ({
         missionId: leg.id,
         authorId: user.id,
@@ -295,7 +296,7 @@ export async function claimMission(id: string): Promise<Result> {
         message: leg.id === mission.id ? "A Scout claimed the complete mission itinerary." : "This mission part was reserved for the assigned Scout.",
       })));
     } else {
-      const claimed = await db.execute(sql`
+      const claimedResult = await db.execute<{ id: string }>(sql`
         WITH locked_profile AS MATERIALIZED (
           UPDATE scout_profiles AS approved_profile
           SET updated_at = approved_profile.updated_at
@@ -337,7 +338,7 @@ export async function claimMission(id: string): Promise<Result> {
         )
         SELECT id::text FROM claimed_mission
       `);
-      if (!(claimed as unknown as { id: string }[])[0]?.id) throw new Error("The mission or your Scout approval changed in another window.");
+      if (!claimedResult.rows[0]?.id) throw new Error("The mission or your Scout approval changed in another window.");
       await db.insert(missionUpdates).values({ missionId: id, authorId: user.id, status: "claimed", message: "A Scout claimed this mission." });
     }
     const claimedMission = await getMission(id);
@@ -1043,7 +1044,7 @@ export async function requestMissionChangeOrder(id: string, description: string)
     )).limit(1);
     if (existing) throw new Error("This mission already has an additional task awaiting approval.");
     const expiresAt = new Date(now.getTime() + 60 * 60 * 1000);
-    const created = await getDb().execute(sql`
+    const createdResult = await getDb().execute<{ id: string }>(sql`
       WITH locked_mission AS MATERIALIZED (
         SELECT active_mission.id, active_mission.bundle_id, active_mission.bundle_sequence
         FROM missions AS active_mission
@@ -1079,7 +1080,7 @@ export async function requestMissionChangeOrder(id: string, description: string)
       )
       SELECT id::text FROM created_order
     `);
-    const orderId = (created as unknown as { id: string }[])[0]?.id;
+    const orderId = createdResult.rows[0]?.id;
     if (!orderId) throw new Error("The mission changed or already has an additional task awaiting approval. Refresh before trying again.");
     const recipientUserId = user.id === mission.customerId ? mission.scoutId : mission.customerId;
     await notifyUser({
@@ -1246,9 +1247,9 @@ export async function confirmMissionComplete(id: string, rating: number, review:
     if (![0, 300, 500, 1000].includes(tipCents)) throw new Error("Choose one of the available tip amounts.");
     const db = getDb();
     const now = new Date();
-    let completed: unknown;
+    let completion: { id: string; review_id: string; tip_payment_id: string | null } | undefined;
     try {
-      completed = await db.execute(sql`
+      const completedResult = await db.execute<{ id: string; review_id: string; tip_payment_id: string | null }>(sql`
       WITH completed_mission AS (
         UPDATE missions AS target
         SET status = 'completed', completed_at = ${now}, location_sharing_active = false,
@@ -1304,6 +1305,11 @@ export async function confirmMissionComplete(id: string, rating: number, review:
         INNER JOIN completed_mission ON completed_mission.id = saved_review.mission_id
         INNER JOIN payments AS booking ON booking.kind = 'booking'
           AND booking.status = 'paid'
+          AND booking.customer_id = saved_review.customer_id
+          AND booking.stripe_customer_id IS NOT NULL
+          AND booking.stripe_payment_intent_id IS NOT NULL
+          AND booking.livemode = ${getStripeLivemode()}
+          AND booking.currency = 'usd'
           AND (
             (completed_mission.bundle_id IS NULL AND booking.mission_id = completed_mission.id)
             OR (completed_mission.bundle_id IS NOT NULL AND booking.bundle_id = completed_mission.bundle_id)
@@ -1329,6 +1335,10 @@ export async function confirmMissionComplete(id: string, rating: number, review:
       )
       SELECT CASE
         WHEN (SELECT COUNT(*) FROM saved_update) = 1
+          AND (SELECT COUNT(*) FROM accepted_result) = 1
+          AND (SELECT COUNT(*) FROM saved_review) = 1
+          AND (SELECT COUNT(*) FROM updated_scout) = 1
+          AND (SELECT COUNT(*) FROM saved_tip_payment) = ${tipCents > 0 ? 1 : 0}
           AND (
             (SELECT bundle_id FROM completed_mission) IS NULL
             OR (SELECT COUNT(*) FROM completed_bundle) = 1
@@ -1339,12 +1349,26 @@ export async function confirmMissionComplete(id: string, rating: number, review:
       (SELECT id::text FROM saved_review) AS review_id,
       (SELECT id::text FROM saved_tip_payment) AS tip_payment_id
       `);
-    } catch {
-      throw new Error("The mission changed in another window. Refresh before trying again.");
+      completion = completedResult.rows[0];
+    } catch (error) {
+      const code = databaseErrorCode(error);
+      console.error("Mission confirmation persistence failed", {
+        missionId: id,
+        customerId: user.id,
+        databaseCode: code ?? "unknown",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+      if (code === "22012") {
+        throw new Error("The mission changed in another window. Refresh before trying again.");
+      }
+      throw new Error("We couldn't confirm this mission. Please try again. If this continues, contact support.");
     }
-    const completion = (completed as unknown as Array<{ id: string; review_id: string; tip_payment_id: string | null }>)[0];
     if (!completion?.id) throw new Error("The mission changed in another window. Refresh before trying again.");
-    await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_confirmed", title: "Mission confirmed", body: `The customer confirmed completion and left a ${rating}-star rating.${tipCents ? " A tip was requested and will appear in earnings after its payment clears." : ""}`, actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
+    try {
+      await notifyUser({ recipientUserId: mission.scoutId, missionId: id, kind: "mission_confirmed", title: "Mission confirmed", body: `The customer confirmed completion and left a ${rating}-star rating.${tipCents ? " A tip was requested and will appear in earnings after its payment clears." : ""}`, actionLabel: "View earnings", actionUrl: "https://sendascout.com/dashboard/scout/earnings" });
+    } catch (error) {
+      console.error("Mission confirmation notification could not be queued", { missionId: id, scoutId: mission.scoutId, error });
+    }
     await settleMissionBestEffort(id, "customer_confirmation");
     if (tipCents > 0) {
       try {
@@ -1666,9 +1690,9 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
       if (["completed", "cancelled"].includes(bundleContext.bundle.status)) throw new Error("This mission bundle is already closed.");
       const targetLegs = bundleContext.legs.filter((leg) => !["completed", "cancelled"].includes(leg.status));
       const expectedScoutCount = status === "completed" && mission.scoutId ? 1 : 0;
-      let updatedBundle: unknown;
+      let updatedBundle: { id: string } | undefined;
       try {
-        updatedBundle = await db.execute(sql`
+        const updatedBundleResult = await db.execute<{ id: string }>(sql`
           WITH changed AS (
             UPDATE missions AS leg
             SET status = ${status}::mission_status,
@@ -1714,10 +1738,11 @@ export async function adminSetMissionStatus(id: string, status: "draft" | "open"
             ELSE (1 / ((SELECT COUNT(*)::integer FROM closed_bundle) - (SELECT COUNT(*)::integer FROM closed_bundle)))::text
           END AS id
         `);
+        updatedBundle = updatedBundleResult.rows[0];
       } catch {
         throw new Error("The mission bundle changed in another window. Refresh before trying again.");
       }
-      if (!(updatedBundle as unknown as { id: string }[]).length) throw new Error("The mission bundle changed in another window. Refresh before trying again.");
+      if (!updatedBundle?.id) throw new Error("The mission bundle changed in another window. Refresh before trying again.");
       if (targetLegs.length) await db.insert(missionUpdates).values(targetLegs.map((leg) => ({ missionId: leg.id, authorId: admin.id, status, message: `Control Room changed the mission bundle to ${status}.` })));
     } else {
       if (["completed", "cancelled"].includes(mission.status)) throw new Error("This mission is already closed.");

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, isNull, lt, or, sum } from "drizzle-orm";
+import { and, asc, eq, gt, isNull, lt, or, sum } from "drizzle-orm";
 import type Stripe from "stripe";
 import { getDb } from "@/db";
 import { missionChangeOrders, missionReviews, missions, payments } from "@/db/schema";
@@ -15,6 +15,7 @@ import {
   ENHANCED_REPORT_SCOUT_CENTS,
   meetPriceForMinutes,
 } from "@/lib/mission-pricing-core";
+import { notifyUser } from "@/lib/notifications";
 import { getStripe, getStripeLivemode, stripeObjectId } from "@/lib/stripe";
 
 type AddonKind = "meet_adjustment" | "change_order" | "tip";
@@ -23,6 +24,8 @@ const OFF_SESSION_CREATING_CODE = "off_session_creating";
 const OFF_SESSION_OUTCOME_UNKNOWN_CODE = "off_session_outcome_unknown";
 const OFF_SESSION_TERMINAL_CODE = "off_session_invalid_request";
 const OFF_SESSION_CREATE_STALE_MS = 5 * 60 * 1000;
+const PENDING_TIP_RECOVERY_DELAY_MS = 2 * 60 * 1000;
+const PENDING_TIP_RECOVERY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const AMBIGUOUS_STRIPE_CREATE_ERROR_TYPES = new Set([
   "StripeConnectionError",
   "StripeAPIError",
@@ -323,6 +326,79 @@ export async function reconcileAmbiguousOffSessionPayments(limit = 25) {
     } catch (error) {
       errors += 1;
       console.error("Ambiguous off-session payment reconciliation failed", {
+        paymentId: row.id,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+  return { found: rows.length, paid, processing, customerActionRequired, errors };
+}
+
+export async function reconcilePendingTipPayments(limit = 25) {
+  const boundedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+  const cutoff = new Date(Date.now() - PENDING_TIP_RECOVERY_DELAY_MS);
+  const oldest = new Date(Date.now() - PENDING_TIP_RECOVERY_MAX_AGE_MS);
+  const rows = await getDb().select({
+    id: payments.id,
+    missionId: payments.missionId,
+    customerId: payments.customerId,
+  }).from(payments)
+    .innerJoin(missions, and(
+      eq(missions.id, payments.missionId),
+      eq(missions.customerId, payments.customerId),
+    ))
+    .innerJoin(missionReviews, and(
+      eq(missionReviews.id, payments.missionReviewId),
+      eq(missionReviews.missionId, payments.missionId),
+      eq(missionReviews.customerId, payments.customerId),
+      eq(missionReviews.tipCents, payments.amountCents),
+    ))
+    .where(and(
+      eq(payments.kind, "tip"),
+      eq(payments.status, "pending"),
+      eq(payments.livemode, getStripeLivemode()),
+      isNull(payments.stripePaymentIntentId),
+      isNull(payments.stripeCheckoutSessionId),
+      lt(payments.createdAt, cutoff),
+      gt(payments.createdAt, oldest),
+      eq(missions.status, "completed"),
+      isNull(missions.archivedAt),
+      eq(missionReviews.tipStatus, "pending"),
+      gt(missionReviews.tipCents, 0),
+      eq(payments.scoutPayoutCents, payments.amountCents),
+      eq(payments.platformFeeCents, 0),
+    ))
+    .orderBy(asc(payments.createdAt))
+    .limit(boundedLimit);
+
+  let paid = 0;
+  let processing = 0;
+  let customerActionRequired = 0;
+  let errors = 0;
+  for (const row of rows) {
+    try {
+      const result = await attemptSavedPayment(row.id);
+      if (result.state === "paid") paid += 1;
+      else if (result.state === "processing") processing += 1;
+      else {
+        customerActionRequired += 1;
+        try {
+          await notifyUser({
+            recipientUserId: row.customerId,
+            missionId: row.missionId,
+            kind: `tip_payment_required:${row.id}`,
+            title: "Tip payment confirmation required",
+            body: "Your mission is complete. Confirm the optional tip separately from the Payments page.",
+            actionLabel: "Open payments",
+            actionUrl: "https://sendascout.com/dashboard/customer/payments",
+          });
+        } catch (error) {
+          console.error("Recovered tip payment notification could not be queued", { paymentId: row.id, error });
+        }
+      }
+    } catch (error) {
+      errors += 1;
+      console.error("Pending tip payment reconciliation failed", {
         paymentId: row.id,
         error: error instanceof Error ? error.message : "Unknown error",
       });
