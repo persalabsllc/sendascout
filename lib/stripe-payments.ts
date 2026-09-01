@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 import { getDb } from "@/db";
 import {
@@ -77,9 +77,10 @@ export async function ensureStripeCustomer(user: AppUser) {
 
 export async function createHostedCheckoutForPayment(paymentId: string, customerId: string) {
   const db = getDb();
-  const [row] = await db.select({ payment: payments, mission: missions })
+  const [row] = await db.select({ payment: payments, mission: missions, bundle: missionBundles })
     .from(payments)
     .innerJoin(missions, eq(missions.id, payments.missionId))
+    .leftJoin(missionBundles, eq(missionBundles.id, payments.bundleId))
     .where(and(eq(payments.id, paymentId), eq(payments.customerId, customerId)))
     .limit(1);
   if (!row) throw new Error("Payment request not found.");
@@ -89,6 +90,49 @@ export async function createHostedCheckoutForPayment(paymentId: string, customer
   if (row.payment.status === "paid") return null;
   if (!payableStatuses.includes(row.payment.status)) throw new Error("This payment cannot be retried.");
   if (row.payment.amountCents <= 0) throw new Error("The payment amount must be greater than zero.");
+  if (row.mission.archivedAt || row.mission.status === "cancelled") {
+    throw new Error("This mission was cancelled, so its payment can no longer be completed.");
+  }
+  if (row.payment.kind === "booking") {
+    if (row.mission.status !== "draft" || (row.payment.bundleId && row.bundle?.status !== "draft")) {
+      throw new Error("This booking is no longer awaiting payment.");
+    }
+    if (row.payment.bundleId) {
+      const [ineligibleLeg] = await db.select({ id: missions.id }).from(missions).where(and(
+        eq(missions.bundleId, row.payment.bundleId),
+        or(sql`${missions.archivedAt} IS NOT NULL`, sql`${missions.status} <> 'draft'`),
+      )).limit(1);
+      if (ineligibleLeg) throw new Error("This itinerary is no longer awaiting payment.");
+    }
+  }
+  const bundleStillAwaitingPayment = row.payment.bundleId
+    ? sql`EXISTS (
+        SELECT 1
+        FROM mission_bundles AS checkout_bundle
+        WHERE checkout_bundle.id = ${row.payment.bundleId}
+          AND checkout_bundle.status = 'draft'
+      ) AND NOT EXISTS (
+        SELECT 1
+        FROM missions AS checkout_leg
+        WHERE checkout_leg.bundle_id = ${row.payment.bundleId}
+          AND (checkout_leg.archived_at IS NOT NULL OR checkout_leg.status <> 'draft')
+      )`
+    : sql`TRUE`;
+  const lifecycleStillEligible = row.payment.kind === "booking"
+    ? sql`EXISTS (
+        SELECT 1
+        FROM missions AS checkout_mission
+        WHERE checkout_mission.id = ${row.mission.id}
+          AND checkout_mission.archived_at IS NULL
+          AND checkout_mission.status = 'draft'
+      ) AND ${bundleStillAwaitingPayment}`
+    : sql`EXISTS (
+        SELECT 1
+        FROM missions AS checkout_mission
+        WHERE checkout_mission.id = ${row.mission.id}
+          AND checkout_mission.archived_at IS NULL
+          AND checkout_mission.status <> 'cancelled'
+      )`;
 
   const stripe = getStripe();
   let priorSessionId = row.payment.stripeCheckoutSessionId;
@@ -127,6 +171,7 @@ export async function createHostedCheckoutForPayment(paymentId: string, customer
         lt(payments.updatedAt, staleClaim),
       ),
     ),
+    lifecycleStillEligible,
   )).returning({ id: payments.id });
   if (!claimed) {
     const [current] = await db.select().from(payments).where(and(eq(payments.id, row.payment.id), eq(payments.customerId, customerId))).limit(1);
@@ -220,8 +265,20 @@ export async function createHostedCheckoutForPayment(paymentId: string, customer
     eq(payments.customerId, customerId),
     eq(payments.status, "processing"),
     eq(payments.failureCode, "checkout_creating"),
+    lifecycleStillEligible,
   )).returning({ id: payments.id });
-  if (!savedSession) throw new Error("Stripe Checkout was created but could not be linked to the payment ledger.");
+  if (!savedSession) {
+    try {
+      if (session.payment_status === "paid") {
+        await recordCheckoutSessionPaid(session);
+      } else if (session.status === "open") {
+        await stripe.checkout.sessions.expire(session.id);
+      }
+    } finally {
+      await cancelUncollectedBookingCheckout(row.mission.id);
+    }
+    throw new Error("This payment changed while secure checkout was being prepared. Refresh before trying again.");
+  }
   return session.url;
 }
 
@@ -862,6 +919,127 @@ export async function recordCheckoutSessionExpired(session: Stripe.Checkout.Sess
     await db.update(missionReviews).set({ tipStatus: "cancelled" }).where(eq(missionReviews.id, payment.missionReviewId));
   }
   return payment ?? null;
+}
+
+export async function cancelUncollectedBookingCheckout(missionId: string) {
+  const db = getDb();
+  const [scope] = await db.select({
+    mission: missions,
+    bundle: missionBundles,
+  }).from(missions)
+    .leftJoin(missionBundles, eq(missionBundles.id, missions.bundleId))
+    .where(eq(missions.id, missionId))
+    .limit(1);
+  if (!scope || scope.mission.status !== "cancelled" || (scope.mission.bundleId && scope.bundle?.status !== "cancelled")) {
+    return { outcome: "not_cancelled" as const };
+  }
+
+  const [payment] = scope.mission.bundleId
+    ? await db.select().from(payments).where(and(
+      eq(payments.bundleId, scope.mission.bundleId),
+      eq(payments.kind, "booking"),
+    )).limit(1)
+    : await db.select().from(payments).where(and(
+      eq(payments.missionId, scope.mission.id),
+      eq(payments.kind, "booking"),
+    )).limit(1);
+  if (!payment) return { outcome: "not_found" as const };
+  const isLocalCheckoutCreation = payment.status === "processing"
+    && payment.failureCode === "checkout_creating"
+    && !payment.stripePaymentIntentId;
+  if (
+    (!payableStatuses.includes(payment.status) && !isLocalCheckoutCreation)
+    || payment.paidAt
+    || payment.stripeChargeId
+    || payment.refundedAmountCents > 0
+  ) {
+    return { outcome: "financial_record_preserved" as const, paymentId: payment.id };
+  }
+
+  if (payment.stripeCheckoutSessionId) {
+    const stripe = getStripe();
+    let session = await stripe.checkout.sessions.retrieve(payment.stripeCheckoutSessionId);
+    validateCheckoutSession(session, payment);
+    if (session.payment_status === "paid") {
+      await recordCheckoutSessionPaid(session);
+      return { outcome: "late_payment_recorded" as const, paymentId: payment.id };
+    }
+    if (session.status === "open") {
+      session = await stripe.checkout.sessions.expire(session.id);
+      validateCheckoutSession(session, payment);
+    }
+    if (session.status !== "expired") {
+      return { outcome: "provider_processing" as const, paymentId: payment.id };
+    }
+  }
+
+  const now = new Date();
+  const [cancelled] = await db.update(payments).set({
+    status: "canceled",
+    failureCode: "mission_cancelled",
+    failureMessage: "The mission was cancelled before this payment was collected.",
+    cancelledAt: now,
+    updatedAt: now,
+  }).where(and(
+    eq(payments.id, payment.id),
+    or(
+      inArray(payments.status, payableStatuses),
+      and(
+        eq(payments.status, "processing"),
+        eq(payments.failureCode, "checkout_creating"),
+        isNull(payments.stripePaymentIntentId),
+      ),
+    ),
+    isNull(payments.paidAt),
+    isNull(payments.stripeChargeId),
+    eq(payments.refundedAmountCents, 0),
+  )).returning();
+  if (!cancelled) return { outcome: "state_changed" as const, paymentId: payment.id };
+  await setBookingPaymentStatus(cancelled, "canceled");
+  return { outcome: "cancelled" as const, paymentId: payment.id };
+}
+
+export async function reconcileCancelledMissionCheckouts(limit = 100) {
+  const boundedLimit = Math.max(1, Math.min(250, limit));
+  const rows = await getDb().select({ id: missions.id }).from(missions)
+    .innerJoin(payments, and(
+      eq(payments.missionId, missions.id),
+      eq(payments.kind, "booking"),
+    ))
+    .where(and(
+      eq(missions.status, "cancelled"),
+      or(
+        inArray(payments.status, payableStatuses),
+        and(
+          eq(payments.status, "processing"),
+          eq(payments.failureCode, "checkout_creating"),
+          isNull(payments.stripePaymentIntentId),
+        ),
+      ),
+      isNull(payments.paidAt),
+      isNull(payments.stripeChargeId),
+      eq(payments.refundedAmountCents, 0),
+      eq(payments.livemode, getStripeLivemode()),
+    ))
+    .orderBy(asc(payments.createdAt))
+    .limit(boundedLimit);
+
+  let cancelled = 0;
+  let latePaid = 0;
+  let processing = 0;
+  let errors = 0;
+  for (const row of rows) {
+    try {
+      const result = await cancelUncollectedBookingCheckout(row.id);
+      if (result.outcome === "cancelled") cancelled += 1;
+      if (result.outcome === "late_payment_recorded") latePaid += 1;
+      if (result.outcome === "provider_processing") processing += 1;
+    } catch (error) {
+      errors += 1;
+      console.error("Cancelled mission checkout reconciliation failed", { missionId: row.id, error });
+    }
+  }
+  return { found: rows.length, cancelled, latePaid, processing, errors };
 }
 
 export async function recordChargeRefunded(charge: Stripe.Charge) {

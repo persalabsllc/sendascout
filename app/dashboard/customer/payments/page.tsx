@@ -6,6 +6,7 @@ import { CustomerDashboardShell } from "@/components/customer-dashboard-shell";
 import { getDb } from "@/db";
 import { missionBundles, missions, payments } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { customerPaymentEntryIsVisible } from "@/lib/customer-payment-ledger";
 
 export const metadata = { title: "Payments | Send a Scout", robots: { index: false, follow: false } };
 
@@ -20,6 +21,7 @@ export default async function CustomerPaymentsPage({
   const { checkout } = await searchParams;
   const ledger = await getDb().select({
     payment: payments,
+    missionStatus: missions.status,
     missionTitle: missions.title,
     missionType: missions.type,
     bundleTitle: missionBundles.title,
@@ -28,11 +30,12 @@ export default async function CustomerPaymentsPage({
     .leftJoin(missionBundles, eq(missionBundles.id, payments.bundleId))
     .where(eq(payments.customerId, user.id))
     .orderBy(desc(payments.createdAt));
+  const visibleLedger = ledger.filter((row) => customerPaymentEntryIsVisible(row.missionStatus, row.payment));
 
-  const requestedCents = ledger.reduce((sum, row) => sum + row.payment.amountCents, 0);
-  const collectedCents = ledger.filter((row) => ["paid", "partially_refunded", "refunded", "disputed"].includes(row.payment.status))
+  const requestedCents = visibleLedger.reduce((sum, row) => sum + row.payment.amountCents, 0);
+  const collectedCents = visibleLedger.filter((row) => ["paid", "partially_refunded", "refunded", "disputed"].includes(row.payment.status))
     .reduce((sum, row) => sum + row.payment.amountCents - row.payment.refundedAmountCents, 0);
-  const attentionCents = ledger.filter((row) => recoverableStatuses.has(row.payment.status))
+  const attentionCents = visibleLedger.filter((row) => row.missionStatus !== "cancelled" && recoverableStatuses.has(row.payment.status))
     .reduce((sum, row) => sum + row.payment.amountCents, 0);
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Customer";
 
@@ -41,14 +44,14 @@ export default async function CustomerPaymentsPage({
     {checkout === "success" && <div className="notification-strip" role="status"><div><IconShieldCheck size={24} /><strong>Payment submitted</strong><p>Stripe is confirming the payment. Its status below will update as soon as confirmation finishes.</p></div></div>}
     {checkout === "cancelled" && <div className="notification-strip" role="status"><div><IconCreditCard size={24} /><strong>Checkout canceled</strong><p>No new payment was completed. You can continue securely from the ledger below.</p></div></div>}
     <div className="stat-grid">
-      <Stat icon={<IconReceipt size={22} />} label="Requested" value={money(requestedCents)} note={`${ledger.length} payment entr${ledger.length === 1 ? "y" : "ies"}`} />
+      <Stat icon={<IconReceipt size={22} />} label="Requested" value={money(requestedCents)} note={`${visibleLedger.length} payment entr${visibleLedger.length === 1 ? "y" : "ies"}`} />
       <Stat icon={<IconCreditCard size={22} />} label="Collected" value={money(collectedCents)} note="After completed refunds" />
       <Stat icon={<IconShieldCheck size={22} />} label="Needs attention" value={money(attentionCents)} note="Secure checkout powered by Stripe" />
     </div>
     <section className="dash-section">
       <div className="dash-section-title"><div><h2>Payment ledger</h2><p>Mission access is released only after its booking payment is confirmed.</p></div></div>
-      {ledger.length ? <div className="mission-list">{ledger.map(({ payment, missionTitle, missionType, bundleTitle }) => {
-        const canContinue = recoverableStatuses.has(payment.status);
+      {visibleLedger.length ? <div className="mission-list">{visibleLedger.map(({ payment, missionStatus, missionTitle, missionType, bundleTitle }) => {
+        const canContinue = missionStatus !== "cancelled" && recoverableStatuses.has(payment.status);
         return <article className="mission-list-row" key={payment.id}>
           <span className="list-icon"><IconReceipt size={21} /></span>
           <div className="list-main">

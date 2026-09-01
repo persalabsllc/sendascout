@@ -8,7 +8,7 @@ import { reportException, runOperationalHealthChecks } from "@/lib/observability
 import { reconcileScoutPayoutReadiness } from "@/lib/stripe-connect-service";
 import { reconcileLatePaymentRefunds } from "@/lib/stripe-late-payment-refunds";
 import { reconcileAmbiguousOffSessionPayments, reconcilePendingTipPayments } from "@/lib/stripe-payment-addons";
-import { reconcilePaidAddonApplications } from "@/lib/stripe-payments";
+import { reconcileCancelledMissionCheckouts, reconcilePaidAddonApplications } from "@/lib/stripe-payments";
 import {
   processPendingPaymentRefunds,
   processPendingPaymentTransferReversals,
@@ -176,6 +176,7 @@ export async function GET(request: Request) {
     }
     const payoutReadinessReconciliation = await reconcileScoutPayoutReadiness();
     const settledTransferReconciliation = await reconcileSettledPaymentTransfers();
+    const cancelledCheckoutReconciliation = await reconcileCancelledMissionCheckouts();
     const pendingTipReconciliation = await reconcilePendingTipPayments();
     const ambiguousOffSessionReconciliation = await reconcileAmbiguousOffSessionPayments();
     const paidAddonApplicationReconciliation = await reconcilePaidAddonApplications();
@@ -188,8 +189,8 @@ export async function GET(request: Request) {
     const settlementReconciliation = await reconcileCompletedMissionSettlements();
     const transfers = await processPendingPaymentTransfers();
     const health = await runOperationalHealthChecks();
-    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
-    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
+    console.log(JSON.stringify({ level: "info", message: "hourly operations completed", route: "/api/cron/auto-complete", requestId, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health, durationMs: Date.now() - startedAt }));
+    return NextResponse.json({ ok: true, completed, preferredBroadcasts, recurringReminders, payoutReadinessReconciliation, settledTransferReconciliation, cancelledCheckoutReconciliation, pendingTipReconciliation, ambiguousOffSessionReconciliation, paidAddonApplicationReconciliation, latePaymentRefundReconciliation, caseRefundReconciliation, supportRefundReconciliation, refunds, transferReversals, casePayoutReconciliation, settlementReconciliation, transfers, health });
   } catch (error) {
     await reportException(error, { route: "/api/cron/auto-complete", requestId, durationMs: Date.now() - startedAt });
     return NextResponse.json({ ok: false, error: "Operations check failed." }, { status: 500 });
