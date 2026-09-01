@@ -62,7 +62,15 @@ function emailHtml(title: string, body: string, actionLabel?: string, actionUrl?
   return `<!doctype html><html><body style="margin:0;background:#f4f7f6;font-family:Arial,sans-serif;color:#102d49"><div style="max-width:600px;margin:0 auto;padding:32px 18px"><div style="font-size:20px;font-weight:800;margin-bottom:24px">Send a Scout</div><div style="background:#fff;border:1px solid #dfe8e6;border-radius:16px;padding:30px"><h1 style="font-size:25px;margin:0 0 14px">${escapeHtml(title)}</h1><p style="font-size:16px;line-height:1.55;color:#526675;margin:0">${escapeHtml(body)}</p>${action}<p style="font-size:12px;color:#7a8b96;margin:28px 0 0">Mission updates are sent to the email on your Send a Scout account. You can change email alerts in your profile settings.</p></div></div></body></html>`;
 }
 
-async function sendEmail(to: string, title: string, body: string, actionLabel?: string, actionUrl?: string) {
+async function sendEmail(
+  to: string,
+  title: string,
+  body: string,
+  notificationId: string,
+  attempt: number,
+  actionLabel?: string,
+  actionUrl?: string,
+) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("Email delivery is not configured.");
   const response = await fetch("https://api.resend.com/emails", {
@@ -70,7 +78,7 @@ async function sendEmail(to: string, title: string, body: string, actionLabel?: 
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "Idempotency-Key": `sendascout-${crypto.randomUUID()}`,
+      "Idempotency-Key": `sendascout-email-${notificationId}-attempt-${attempt}`,
     },
     body: JSON.stringify({
       from: process.env.SENDASCOUT_EMAIL_FROM ?? "Send a Scout <alerts@sendascout.com>",
@@ -129,9 +137,19 @@ async function queueEmail(input: NotificationInput & { email: string }) {
     actionUrl: input.actionUrl ?? null,
   }).returning({ id: notifications.id });
   try {
-    await db.update(notifications).set({ attemptCount: sql`${notifications.attemptCount} + 1`, lastAttemptAt: new Date() }).where(eq(notifications.id, queued.id));
-    const providerMessageId = await sendEmail(input.email, input.title, input.body, input.actionLabel, input.actionUrl);
-    await db.update(notifications).set({ status: "sent", providerMessageId, sentAt: new Date(), error: null }).where(eq(notifications.id, queued.id));
+    const [started] = await db.update(notifications).set({
+      attemptCount: sql`${notifications.attemptCount} + 1`,
+      lastAttemptAt: new Date(),
+    }).where(eq(notifications.id, queued.id)).returning({ attempt: notifications.attemptCount });
+    if (!started) throw new Error("Email notification attempt could not be started.");
+    const providerMessageId = await sendEmail(input.email, input.title, input.body, queued.id, started.attempt, input.actionLabel, input.actionUrl);
+    await db.update(notifications).set({ status: "pending", providerMessageId, sentAt: null, error: null }).where(eq(notifications.id, queued.id));
+    console.info("Send a Scout email accepted by provider", {
+      notificationId: queued.id,
+      kind: input.kind,
+      attempt: started.attempt,
+      providerMessageId,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Email delivery failed.";
     await db.update(notifications).set({ status: "failed", error: message }).where(eq(notifications.id, queued.id));
@@ -172,23 +190,32 @@ export async function retryEmailNotification(notificationId: string) {
     body: notifications.body,
     actionLabel: notifications.actionLabel,
     actionUrl: notifications.actionUrl,
+    kind: notifications.kind,
     email: users.email,
     enabled: users.emailNotificationsEnabled,
   }).from(notifications).innerJoin(users, eq(users.id, notifications.recipientUserId))
     .where(eq(notifications.id, notificationId)).limit(1);
   if (!item || item.channel !== "email") throw new Error("Email notification not found.");
-  if (item.status === "sent") throw new Error("This email was already delivered.");
   if (!item.enabled) throw new Error("The recipient has disabled email notifications.");
 
-  await db.update(notifications).set({
+  const [started] = await db.update(notifications).set({
     status: "pending",
     error: null,
+    providerMessageId: null,
+    sentAt: null,
     attemptCount: sql`${notifications.attemptCount} + 1`,
     lastAttemptAt: new Date(),
-  }).where(eq(notifications.id, item.id));
+  }).where(eq(notifications.id, item.id)).returning({ attempt: notifications.attemptCount });
+  if (!started) throw new Error("Email notification attempt could not be started.");
   try {
-    const providerMessageId = await sendEmail(item.email, item.title, item.body, item.actionLabel ?? undefined, item.actionUrl ?? undefined);
-    await db.update(notifications).set({ status: "sent", providerMessageId, sentAt: new Date(), error: null }).where(eq(notifications.id, item.id));
+    const providerMessageId = await sendEmail(item.email, item.title, item.body, item.id, started.attempt, item.actionLabel ?? undefined, item.actionUrl ?? undefined);
+    await db.update(notifications).set({ status: "pending", providerMessageId, sentAt: null, error: null }).where(eq(notifications.id, item.id));
+    console.info("Send a Scout email accepted by provider", {
+      notificationId: item.id,
+      kind: item.kind,
+      attempt: started.attempt,
+      providerMessageId,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Email delivery failed.";
     await db.update(notifications).set({ status: "failed", error: message }).where(eq(notifications.id, item.id));

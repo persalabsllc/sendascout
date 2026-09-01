@@ -833,7 +833,21 @@ export async function submitMissionResults(
       }
       throw new Error("We couldn't submit your results. Please try again. If this continues, contact support.");
     }
-    await notifyUser(resultNotification);
+    const scoutSubmissionNotification: Parameters<typeof notifyUser>[0] = {
+      recipientUserId: user.id,
+      missionId: id,
+      kind: "results_submission_received",
+      title: nextLeg ? "Mission part submitted" : "Results submitted — awaiting review",
+      body: nextLeg
+        ? "Your results for this mission part were submitted successfully. Continue with the next part. The full mission is not complete, and payout has not been released."
+        : "Your results were submitted successfully and are awaiting customer review. The mission is not complete, and payout has not been released.",
+      actionLabel: nextLeg ? "Open next mission part" : "View submission",
+      actionUrl: `https://sendascout.com/dashboard/missions/${nextLeg?.id ?? id}`,
+    };
+    await Promise.all([
+      notifyUser(resultNotification),
+      notifyUser(scoutSubmissionNotification),
+    ]);
     if (additionalRefreshId) refreshMission(additionalRefreshId);
     refreshMission(id);
     return { ok: true };

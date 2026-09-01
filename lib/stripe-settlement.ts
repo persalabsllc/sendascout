@@ -46,7 +46,7 @@ export async function reconcileCompletedMissionSettlements(options: { limit?: nu
   const db = getDb();
   const livemode = getStripeLivemode();
   const limit = Math.max(1, Math.min(250, options.limit ?? 100));
-  const rows = await db.execute(sql`
+  const candidateResult = await db.execute<{ id: string }>(sql`
     SELECT root.id::text
     FROM missions AS root
     LEFT JOIN mission_bundles AS parent ON parent.id = root.bundle_id
@@ -109,7 +109,8 @@ export async function reconcileCompletedMissionSettlements(options: { limit?: nu
       )
     ORDER BY COALESCE(parent.completed_at, root.completed_at) ASC NULLS LAST
     LIMIT ${limit}
-  `) as unknown as Array<{ id: string }>;
+  `);
+  const rows = candidateResult.rows;
 
   let reconciled = 0;
   for (const row of rows) {
@@ -265,7 +266,7 @@ export async function settleCasePayoutBestEffort(caseId: string, source: string)
 }
 
 export async function reconcileCasePayouts(limit = 100) {
-  const rows = await getDb().execute(sql`
+  const candidateResult = await getDb().execute<{ id: string }>(sql`
     SELECT financial_case.id::text
     FROM mission_cases AS financial_case
     WHERE financial_case.status = 'resolved'
@@ -279,7 +280,8 @@ export async function reconcileCasePayouts(limit = 100) {
       ), 0) < financial_case.payout_amount_cents
     ORDER BY financial_case.resolved_at ASC NULLS LAST, financial_case.created_at ASC
     LIMIT ${Math.max(1, Math.min(250, limit))}
-  `) as unknown as Array<{ id: string }>;
+  `);
+  const rows = candidateResult.rows;
 
   let reconciled = 0;
   for (const row of rows) {

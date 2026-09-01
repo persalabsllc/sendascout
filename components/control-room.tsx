@@ -10,7 +10,7 @@ import { Brand } from "./brand";
 
 type MissionRow = { id: string; title: string; type: string; status: string; paymentStatus: string; customer: string; location: string; price: number; payout: number; routeMiles: number | null; routeVerified: boolean; authorizedMinutes: number; createdAt: string };
 type CaseRow = { id: string; missionId: string; missionTitle: string; kind: string; status: string; previousMissionStatus: string; summary: string; reporter: string; adminNotes: string | null; resolution: string | null; refundAmountCents: number; payoutAmountCents: number; financialApprovalPending: boolean; proposedByCurrentAdmin: boolean; createdAt: string; resolvedAt: string | null; customerPriceCents: number; scoutPayoutCents: number };
-type MessageRow = { id: string; channel: string; recipient: string; title: string; status: string; error: string | null; attempts: number; createdAt: string; sentAt: string | null };
+type MessageRow = { id: string; channel: string; recipient: string; title: string; status: string; error: string | null; attempts: number; providerAccepted: boolean; lastAttemptAt: string | null; createdAt: string; sentAt: string | null };
 type OperationalEventRow = { id: string; severity: string; category: string; message: string; status: string; occurrenceCount: number; lastSeenAt: string; alertedAt: string | null };
 
 export function ControlRoom({ stats, missions, cases, messageNotifications, operationalEvents, sentMode }: { stats: { newCustomers: number; newScouts: number; open: number; active: number; cases: number; failedMessages: number }; missions: MissionRow[]; cases: CaseRow[]; messageNotifications: MessageRow[]; operationalEvents: OperationalEventRow[]; sentMode: "Disabled" | "Sandbox" | "Live" }) {
@@ -76,9 +76,9 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
       <section className="control-section">
         <div className="control-section-title"><div><h2>Message delivery</h2><p>Recent email and text alerts, provider results and controlled retries. Sent SMS mode: <strong>{sentMode}</strong>.</p></div></div>
         {messageNotifications.length ? <div className="control-table email-delivery-list">{messageNotifications.map((item) => <article key={item.id}>
-          <div className="control-primary"><small>{item.channel.toUpperCase()}</small><strong>{item.title}</strong><span>{item.recipient} · {new Date(item.createdAt).toLocaleString()}</span><small>{item.status === "failed" ? item.error || `Provider rejected the ${item.channel}` : item.sentAt ? `Delivered ${new Date(item.sentAt).toLocaleString()}` : "Awaiting provider result"} · {item.attempts} attempt{item.attempts === 1 ? "" : "s"}</small></div>
-          <span className={`status ${item.status === "failed" ? "warning-status" : ""}`}>{titleCase(item.status)}</span>
-          <div className="control-actions">{item.status !== "sent" && <button disabled={pending} onClick={() => run(() => adminRetryNotification(item.id))}><IconRefresh size={15} /> Retry</button>}</div>
+          <div className="control-primary"><small>{item.channel.toUpperCase()}</small><strong>{item.title}</strong><span>{item.recipient} · {new Date(item.createdAt).toLocaleString()}</span><small>{messageDeliveryDetail(item)} · {item.attempts} attempt{item.attempts === 1 ? "" : "s"}</small></div>
+          <span className={`status ${item.status === "failed" ? "warning-status" : ""}`}>{item.channel === "email" && item.providerAccepted ? "Accepted" : titleCase(item.status)}</span>
+          <div className="control-actions">{(item.channel === "email" || item.status !== "sent") && <button disabled={pending} onClick={() => run(() => adminRetryNotification(item.id))}><IconRefresh size={15} /> {item.channel === "email" && item.providerAccepted ? "Resend" : "Retry"}</button>}</div>
         </article>)}</div> : <div className="control-empty">No email or text delivery records yet.</div>}
       </section>
     </div>
@@ -114,6 +114,16 @@ function centsFromInput(value: string) {
 function normalizeMoneyInput(value: string) {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= 0 ? amount.toFixed(2) : "0.00";
+}
+
+function messageDeliveryDetail(item: MessageRow) {
+  if (item.status === "failed") return item.error || `Provider rejected the ${item.channel}`;
+  if (item.channel === "email" && item.providerAccepted) {
+    const acceptedAt = item.lastAttemptAt ? ` ${new Date(item.lastAttemptAt).toLocaleString()}` : "";
+    return `Accepted by email provider${acceptedAt}; delivery is not independently confirmed`;
+  }
+  if (item.sentAt) return `Delivered ${new Date(item.sentAt).toLocaleString()}`;
+  return "Awaiting provider result";
 }
 
 function ControlStat({ icon: Icon, label, value, href, alert = false }: { icon: typeof IconUsers; label: string; value: number; href?: string; alert?: boolean }) {

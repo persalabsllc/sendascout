@@ -109,6 +109,8 @@ export default async function ControlRoomPage() {
       status: notification.status,
       error: notification.error,
       attempts: notification.attemptCount,
+      providerAccepted: Boolean(notification.providerMessageId),
+      lastAttemptAt: notification.lastAttemptAt?.toISOString() ?? null,
       createdAt: notification.createdAt.toISOString(),
       sentAt: notification.sentAt?.toISOString() ?? null,
     }))}
