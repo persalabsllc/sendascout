@@ -213,7 +213,7 @@ export const SCOUT_HANDBOOK_SECTIONS: readonly ScoutHandbookSection[] = [
     title: "Handbook compliance",
     paragraphs: [
       "Following this handbook is a condition of accessing missions through Send a Scout. Depending on the circumstances, violations may result in a warning, mission cancellation or reassignment, restricted access, suspension, deactivation, referral to law enforcement, or another action permitted by the platform Terms. Payment and dispute decisions are handled under the applicable Terms and mission records.",
-      "The current handbook remains available in the Scout dashboard. If a material change is made, Scouts may be required to review and accept the updated version before viewing or accepting additional missions.",
+      "The current handbook remains available in the Scout dashboard. If a material change is made, Scouts may be required to review and accept the updated version before accepting additional missions.",
     ],
   },
 ];

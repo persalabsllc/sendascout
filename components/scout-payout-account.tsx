@@ -27,7 +27,8 @@ export function ScoutPayoutAccount(props: Props) {
   const choiceHeadingRef = useRef<HTMLHeadingElement>(null);
   const modeMismatch = props.hasAccount && !props.livemodeMatches;
   const ready = props.status === "ready" && props.livemodeMatches && props.canReceiveTransfers && props.payoutScheduleConfigured;
-  const due = [...props.pastDue, ...props.currentlyDue];
+  const schedulePending = props.status === "ready" && props.livemodeMatches && props.canReceiveTransfers && !props.payoutScheduleConfigured;
+  const due = [...new Set([...props.pastDue, ...props.currentlyDue])];
   const needsAction = modeMismatch || due.length > 0 || props.status === "restricted" || props.status === "onboarding" || props.status === "not_started";
 
   useEffect(() => {
@@ -76,6 +77,8 @@ export function ScoutPayoutAccount(props: Props) {
         <p>Your account can receive mission earnings. Send a Scout initiates eligible transfers each Friday UTC; bank arrival follows Stripe&apos;s payout timing.</p>
         {due.length > 0 && <><p className="payout-account-note">Stripe needs updated information. Transfers are currently available, but complete these items before they become past due.</p><ul>{due.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul></>}
         {!due.length && props.futureDue.length > 0 && <p className="payout-account-note">Stripe lists {props.futureDue.length} future requirement{props.futureDue.length === 1 ? "" : "s"}. We’ll keep showing them here before they become due.</p>}
+      </> : schedulePending ? <>
+        <p>Your Stripe account can receive earnings. Send a Scout is confirming the automatic weekly Friday payout schedule. No action is required from you while this finishes.</p>
       </> : props.status === "pending" ? <>
         <p>Stripe is reviewing the information you submitted. You can refresh this page or reopen setup if Stripe requests anything else.</p>
         {props.pendingVerification.length > 0 && <p className="payout-account-note">{props.pendingVerification.length} item{props.pendingVerification.length === 1 ? " is" : "s are"} pending verification.</p>}
@@ -102,7 +105,7 @@ export function ScoutPayoutAccount(props: Props) {
       </div>}
       {message && <p className={message.includes("refreshed") ? "form-success" : "form-error"}>{message}</p>}
       <div className="payout-account-actions">
-        {ready && !needsAction ? <button className="button" disabled={pending} onClick={openDashboard}>Manage payouts in Stripe <IconExternalLink size={17} /></button> : !showAccountChoice && <button className="button" disabled={pending} onClick={() => openOnboarding()}>{pending ? "Opening Stripe…" : props.hasAccount ? "Update payout setup" : "Set up secure payouts"} {!pending && <IconExternalLink size={17} />}</button>}
+        {ready && !needsAction ? <button className="button" disabled={pending} onClick={openDashboard}>Manage payouts in Stripe <IconExternalLink size={17} /></button> : !schedulePending && !showAccountChoice && <button className="button" disabled={pending} onClick={() => openOnboarding()}>{pending ? "Opening Stripe…" : props.hasAccount ? "Update payout setup" : "Set up secure payouts"} {!pending && <IconExternalLink size={17} />}</button>}
         <button className="button button-ghost" disabled={pending} onClick={refresh}><IconRefresh size={17} /> Refresh status</button>
       </div>
     </div>

@@ -259,8 +259,11 @@ async function syncStripeAccountProfile(accountId: string, apiVersion: AccountAp
   const expectedLivemode = getStripeLivemode();
   const wasReady = scoutConnectReady(existing, expectedLivemode);
 
-  let payoutScheduleConfiguredAt: Date | null = null;
+  let payoutScheduleConfiguredAt: Date | null = summary.transfersActive && summary.payoutsEnabled
+    ? existing.stripePayoutScheduleConfiguredAt
+    : null;
   if (summary.transfersActive && summary.payoutsEnabled) {
+    let authoritativeNoncomplianceObserved = false;
     try {
       const connectedRequest = apiVersion === "v2"
         ? { stripeContext: accountId }
@@ -268,6 +271,8 @@ async function syncStripeAccountProfile(accountId: string, apiVersion: AccountAp
       const balanceSettings = await stripe.balanceSettings.retrieve({}, connectedRequest);
       const fridaySchedule = stripeBalanceSettingsUseRequiredFridaySchedule(balanceSettings);
       if (!fridaySchedule) {
+        authoritativeNoncomplianceObserved = true;
+        payoutScheduleConfiguredAt = null;
         await stripe.balanceSettings.update({
           payments: {
             payouts: {
@@ -290,6 +295,9 @@ async function syncStripeAccountProfile(accountId: string, apiVersion: AccountAp
       payoutScheduleConfiguredAt = new Date();
     } catch (error) {
       console.error("Stripe payout schedule could not be configured", { accountId, error: stripeErrorDetails(error) });
+      if (!authoritativeNoncomplianceObserved) {
+        payoutScheduleConfiguredAt = existing.stripePayoutScheduleConfiguredAt;
+      }
     }
   }
 

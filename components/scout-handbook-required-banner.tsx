@@ -6,14 +6,14 @@ export function ScoutHandbookRequiredBanner({ next }: { next?: string }) {
     ? `/dashboard/scout/handbook?next=${encodeURIComponent(next)}`
     : "/dashboard/scout/handbook";
   return <Link
-    aria-label="Review and acknowledge the Scout Handbook to unlock open missions"
+    aria-label="Review and acknowledge the Scout Handbook before claiming a mission"
     className="scout-payout-required-banner scout-handbook-required-banner"
     href={href}
   >
     <span className="scout-payout-required-icon"><IconBook2 aria-hidden="true" size={25} /></span>
     <div>
-      <strong>Review the Scout Handbook to unlock missions</strong>
-      <p>Read the safety, privacy, property-care, and professional conduct standards every Scout follows.</p>
+      <strong>Review the Scout Handbook before claiming</strong>
+      <p>You can browse missions now. Read the safety, privacy, property-care, and conduct standards before accepting one.</p>
     </div>
     <span className="scout-payout-required-action">Review handbook <IconArrowRight aria-hidden="true" size={17} /></span>
   </Link>;

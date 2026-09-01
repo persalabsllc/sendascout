@@ -5,9 +5,7 @@ import { missionBundles, missions, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { computeDrivingRoute } from "@/lib/google-maps";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
-import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
-import { scoutConnectReady } from "@/lib/stripe-connect";
-import { getStripeLivemode } from "@/lib/stripe";
+import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
 
 export async function GET(request: Request) {
   const user = await requireAppUser("customer");
@@ -22,6 +20,7 @@ export async function GET(request: Request) {
     : [null];
 
   let allowed = mission.customerId === user.id || mission.scoutId === user.id || user.role === "admin";
+  let planningPrecision = 3;
   if (!allowed && user.role === "scout" && mission.status === "open" && mission.paymentStatus === "paid" && (!bundle || bundle.paymentStatus === "paid") && !mission.scoutId) {
     const [[profile], itinerary] = await Promise.all([
       db.select().from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1),
@@ -33,17 +32,15 @@ export async function GET(request: Request) {
       leg.preferredScoutId
       && leg.preferredScoutId !== user.id
       && !leg.preferredScoutBroadcastAt
-      && leg.preferredScoutExclusiveUntil
-      && leg.preferredScoutExclusiveUntil.getTime() > Date.now(),
+      && (!leg.preferredScoutExclusiveUntil || leg.preferredScoutExclusiveUntil.getTime() > Date.now()),
     ));
     allowed = Boolean(
       !privateFirstLook
       && profile
-      && hasCurrentScoutHandbookAcceptance(profile)
-      && profile.status === "approved"
-      && scoutConnectReady(profile, getStripeLivemode())
+      && scoutCanBrowseOpenMissions(profile)
       && itinerary.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, profile)),
     );
+    planningPrecision = profile?.status === "approved" ? 3 : 2;
   }
   if (!allowed) return NextResponse.json({ error: "You cannot view this mission map." }, { status: 403 });
 
@@ -51,7 +48,7 @@ export async function GET(request: Request) {
   if (!key || !mission.pickupLatitude || !mission.pickupLongitude) return NextResponse.json({ error: "Mission map is unavailable." }, { status: 503 });
 
   const planningView = user.role === "scout" && mission.scoutId !== user.id;
-  const pickup = coordinatePair(mission.pickupLatitude, mission.pickupLongitude, planningView);
+  const pickup = coordinatePair(mission.pickupLatitude, mission.pickupLongitude, planningView ? planningPrecision : 6);
   const mapUrl = new URL("https://maps.googleapis.com/maps/api/staticmap");
   mapUrl.searchParams.set("size", "900x480");
   mapUrl.searchParams.set("scale", "2");
@@ -59,7 +56,7 @@ export async function GET(request: Request) {
   mapUrl.searchParams.set("key", key);
 
   if (mission.type === "move" && mission.dropoffLatitude && mission.dropoffLongitude) {
-    const dropoff = coordinatePair(mission.dropoffLatitude, mission.dropoffLongitude, planningView);
+    const dropoff = coordinatePair(mission.dropoffLatitude, mission.dropoffLongitude, planningView ? planningPrecision : 6);
     let routePolyline = planningView ? null : mission.routePolyline;
     if (!planningView && !routePolyline) {
       try {
@@ -96,7 +93,6 @@ export async function GET(request: Request) {
   });
 }
 
-function coordinatePair(latitude: string, longitude: string, approximate: boolean) {
-  const precision = approximate ? 3 : 6;
+function coordinatePair(latitude: string, longitude: string, precision: number) {
   return `${Number(latitude).toFixed(precision)},${Number(longitude).toFixed(precision)}`;
 }

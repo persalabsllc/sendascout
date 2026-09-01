@@ -200,7 +200,7 @@ export default async function Home() {
             <h2>Every mission is different.<br />And every mission pays.</h2>
           </div>
           <div className="scout-cta-copy">
-            <p>Turn your local knowledge and spare time into better-paying work. No registration cost, no scheduled shifts and same-day payout options.</p>
+            <p>Turn your local knowledge and spare time into better-paying work. No registration cost, no scheduled shifts and secure weekly payouts through Stripe.</p>
             <Link className="button button-light" href="/scout">Join the Scout network <IconArrowRight size={20} /></Link>
           </div>
         </div>

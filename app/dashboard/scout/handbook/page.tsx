@@ -37,7 +37,7 @@ export default async function ScoutHandbookPage({
 
     {accepted
       ? <div className="scout-banner"><span><IconCircleCheck size={26} /></span><div><strong>You acknowledged the current handbook</strong><p>Version {SCOUT_HANDBOOK_VERSION} · effective {SCOUT_HANDBOOK_EFFECTIVE_DATE} · acknowledged {formatAcceptanceDate(profile.handbookAcceptedAt)}</p></div><span className="status">Current</span></div>
-      : <div className="handbook-required-card" role="status"><span><IconBook2 size={25} /></span><div><strong>{profile.handbookVersion ? "The Scout Handbook has been updated" : "Handbook review is required"}</strong><p>Read and acknowledge the current version below to see and claim new open missions. Any mission already assigned to you remains accessible.</p></div></div>}
+      : <div className="handbook-required-card" role="status"><span><IconBook2 size={25} /></span><div><strong>{profile.handbookVersion ? "The Scout Handbook has been updated" : "Handbook review is required"}</strong><p>You may browse open missions, but you must read and acknowledge the current version before claiming one. Any mission already assigned to you remains accessible.</p></div></div>}
 
     {accepted
       ? <ScoutHandbookContent />

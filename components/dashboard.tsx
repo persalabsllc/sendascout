@@ -122,17 +122,18 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
 }
 
 function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutReady, scoutHandbookAccepted }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean; scoutPayoutReady: boolean; scoutHandbookAccepted: boolean }) {
+  const canBrowseOpen = ["applicant", "review", "approved"].includes(profileStatus);
   const available = missions.filter((mission) => mission.status === "open" && !mission.assigned);
   const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
   const completed = missions.filter((mission) => mission.assigned && mission.status === "completed");
   const missionBoard = [...active, ...available];
   const earned = completed.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
-    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : "Founding Scout application"}</strong><p>{profileStatus === "approved" ? !scoutHandbookAccepted ? "Your application is approved. Review the Scout Handbook to unlock matching missions." : scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "Your application is approved. Finish payout setup before matching missions can appear." : "Your application is saved. Identity and background verification will open before launch."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
-    {!scoutHandbookAccepted && <ScoutHandbookRequiredBanner />}
-    {!scoutPayoutReady && <ScoutPayoutRequiredBanner applicationApproved={profileStatus === "approved"} />}
+    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : profileStatus === "paused" ? "Scout access paused" : profileStatus === "rejected" ? "Application status" : "Founding Scout application"}</strong><p>{profileStatus === "paused" ? "New opportunities are hidden while Control Room reviews your account. Assigned work remains available." : profileStatus === "rejected" ? "This application is not eligible for new mission opportunities. Contact support if you believe this is an error." : profileStatus === "approved" ? !scoutHandbookAccepted ? "You can browse matching missions now. Review the Scout Handbook before claiming one." : scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "You can browse matching missions now. Finish payout setup before claiming one." : "Your application is saved. You can browse matching opportunities while finishing the requirements to claim."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
+    {canBrowseOpen && !scoutHandbookAccepted && <ScoutHandbookRequiredBanner />}
+    {canBrowseOpen && !scoutPayoutReady && <ScoutPayoutRequiredBanner applicationApproved={profileStatus === "approved"} />}
     <div className="stat-grid scout-stats">
-      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note={scoutHandbookAccepted ? "Open missions in your area" : "Review the handbook to unlock"} />
+      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note={profileStatus === "paused" || profileStatus === "rejected" ? "New opportunities are hidden" : "Open missions in your area"} />
       <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />
       <Stat icon={IconRoute} label="Completed" value={String(completed.length)} note={completed.length ? "Your completed missions" : "Ready for your first"} />
     </div>
@@ -141,13 +142,19 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutRe
       {missionBoard.length ? <div className="mission-list scout-list">{missionBoard.map((mission) => {
         const Icon = iconFor(mission.type);
         return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>You&apos;ll earn</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
-      })}</div> : scoutHandbookAccepted ? <EmptyMissions /> : <div className="dashboard-empty"><IconBook2 size={30} /><h3>Review the Scout Handbook</h3><p>Acknowledge the current handbook to see and claim matching open missions.</p><Link className="button button-small" href="/dashboard/scout/handbook">Review handbook</Link></div>}
+      })}</div> : <EmptyMissions profileStatus={profileStatus} />}
     </section>
   </>;
 }
 
-function EmptyMissions({ customer = false }: { customer?: boolean }) {
-  return <div className="dashboard-empty"><IconTargetArrow size={30} /><h3>{customer ? "No missions yet" : "The mission board is warming up"}</h3><p>{customer ? "Create your first mission and it will appear here immediately." : "Approved Scouts will see matching nearby missions here as customers post them."}</p>{customer && <Link className="button button-small" href="/request">Create a mission</Link>}</div>;
+function EmptyMissions({ customer = false, profileStatus }: { customer?: boolean; profileStatus?: string }) {
+  const scoutHeading = profileStatus === "paused" ? "New opportunities are paused" : profileStatus === "rejected" ? "No new mission access" : "The mission board is warming up";
+  const scoutCopy = profileStatus === "paused"
+    ? "Assigned work remains available, but new opportunities stay hidden until Control Room restores access."
+    : profileStatus === "rejected"
+      ? "This application is not eligible for new mission opportunities. Contact support if you believe this is an error."
+      : "Matching nearby opportunities will appear here as customers post them. Complete onboarding to claim one.";
+  return <div className="dashboard-empty"><IconTargetArrow size={30} /><h3>{customer ? "No missions yet" : scoutHeading}</h3><p>{customer ? "Create your first mission and it will appear here immediately." : scoutCopy}</p>{customer && <Link className="button button-small" href="/request">Create mission</Link>}</div>;
 }
 
 function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) { return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>; }

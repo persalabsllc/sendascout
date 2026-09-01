@@ -29,9 +29,8 @@ type MissionBundleRecord = typeof missionBundles.$inferSelect;
 function preferredWindowIsActive(mission: MissionAlertRecord, now = Date.now()) {
   return Boolean(
     mission.preferredScoutId
-    && mission.preferredScoutExclusiveUntil
-    && mission.preferredScoutExclusiveUntil.getTime() > now
     && !mission.preferredScoutBroadcastAt
+    && (!mission.preferredScoutExclusiveUntil || mission.preferredScoutExclusiveUntil.getTime() > now)
   );
 }
 

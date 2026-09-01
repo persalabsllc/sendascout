@@ -196,8 +196,7 @@ export async function claimMission(id: string): Promise<Result> {
       candidate.preferredScoutId
       && candidate.preferredScoutId !== user.id
       && !candidate.preferredScoutBroadcastAt
-      && candidate.preferredScoutExclusiveUntil
-      && candidate.preferredScoutExclusiveUntil.getTime() > now.getTime(),
+      && (!candidate.preferredScoutExclusiveUntil || candidate.preferredScoutExclusiveUntil.getTime() > now.getTime()),
     ));
     if (firstLookActive) throw new Error("This mission is currently in another Scout’s private first-look window.");
     if (bundleContext) {
@@ -246,8 +245,10 @@ export async function claimMission(id: string): Promise<Result> {
                 AND locked_part.preferred_scout_id IS NOT NULL
                 AND locked_part.preferred_scout_id <> ${user.id}
                 AND locked_part.preferred_scout_broadcast_at IS NULL
-                AND locked_part.preferred_scout_exclusive_until IS NOT NULL
-                AND locked_part.preferred_scout_exclusive_until > ${now}
+                AND (
+                  locked_part.preferred_scout_exclusive_until IS NULL
+                  OR locked_part.preferred_scout_exclusive_until > ${now}
+                )
             )
         ), assigned AS (
           UPDATE missions AS candidate
@@ -345,6 +346,15 @@ export async function claimMission(id: string): Promise<Result> {
             AND candidate.payment_status = 'paid'
             AND candidate.scout_id IS NULL
             AND candidate.archived_at IS NULL
+            AND (
+              candidate.preferred_scout_id IS NULL
+              OR candidate.preferred_scout_id = ${user.id}
+              OR candidate.preferred_scout_broadcast_at IS NOT NULL
+              OR (
+                candidate.preferred_scout_exclusive_until IS NOT NULL
+                AND candidate.preferred_scout_exclusive_until <= ${now}
+              )
+            )
           RETURNING candidate.id
         )
         SELECT id::text FROM claimed_mission
@@ -1497,6 +1507,7 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
     revalidatePath("/dashboard/scout");
     revalidatePath("/dashboard/scout/missions");
     revalidatePath("/control-room");
+    revalidatePath("/control-room/scouts");
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to update the Scout." };
@@ -1521,6 +1532,7 @@ export async function adminRecordScoutIdentity(profileId: string): Promise<Resul
       updatedAt: new Date(),
     }).where(eq(scoutProfiles.id, profileId));
     revalidatePath("/control-room");
+    revalidatePath("/control-room/scouts");
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Unable to record identity verification." };

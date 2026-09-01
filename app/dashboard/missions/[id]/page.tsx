@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, or, isNotNull, isNull, sql } from "drizzle-orm";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
 import { getDb } from "@/db";
 import {
@@ -18,9 +18,10 @@ import {
 } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
-import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
-import { scoutConnectReady } from "@/lib/stripe-connect";
+import { nextScoutOnboardingStep, scoutReadyForApproval } from "@/lib/scout-approval";
+import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
 import { getStripeLivemode } from "@/lib/stripe";
+import { LEGAL_VERSION } from "@/lib/legal";
 
 export const metadata = { title: "Mission | Send a Scout", robots: { index: false, follow: false } };
 
@@ -41,6 +42,8 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
 
   let role: "customer" | "scout" | "admin";
   let canClaim = false;
+  let planningMapPrecision = 3;
+  let claimRequirement: { message: string; href?: string; label?: string } | null = null;
   if (mission.customerId === user.id) role = "customer";
   else if (mission.scoutId === user.id) role = "scout";
   else if (user.role === "admin") role = "admin";
@@ -51,17 +54,22 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
         ${missions.preferredScoutId} IS NULL
         OR ${missions.preferredScoutId} = ${user.id}
         OR ${missions.preferredScoutBroadcastAt} IS NOT NULL
-        OR ${missions.preferredScoutExclusiveUntil} IS NULL
         OR ${missions.preferredScoutExclusiveUntil} <= now()
       )` }).from(missions).where(inArray(missions.id, itinerary.map((leg) => leg.id))),
     ]);
-    if (!profile || profile.status !== "approved" || !scoutConnectReady(profile, getStripeLivemode()) || itinerary.some((leg) => leg.paymentStatus !== "paid") || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
-    if (!hasCurrentScoutHandbookAcceptance(profile)) {
-      const currentPath = `/dashboard/missions/${encodeURIComponent(id)}`;
-      redirect(`/dashboard/scout/handbook?next=${encodeURIComponent(currentPath)}`);
-    }
+    if (!scoutCanBrowseOpenMissions(profile) || itinerary.some((leg) => leg.paymentStatus !== "paid") || claimWindows.length !== itinerary.length || claimWindows.some((window) => !window.available) || itinerary.some((leg) => !isMissionEligibleForScout(leg, profile))) notFound();
     role = "scout";
-    canClaim = true;
+    planningMapPrecision = profile.status === "approved" ? 3 : 2;
+    canClaim = profile.status === "approved"
+      && scoutReadyForApproval({ ...profile, ...user }, LEGAL_VERSION, getStripeLivemode());
+    if (!canClaim) {
+      const nextStep = nextScoutOnboardingStep({ ...profile, ...user }, LEGAL_VERSION, getStripeLivemode(), profile.status);
+      const currentPath = `/dashboard/missions/${encodeURIComponent(id)}`;
+      const href = nextStep.key === "handbook"
+        ? `/dashboard/scout/handbook?next=${encodeURIComponent(currentPath)}`
+        : nextStep.actionHref;
+      claimRequirement = { message: nextStep.label, href, label: nextStep.actionLabel };
+    }
   } else notFound();
   const finalLeg = itinerary.at(-1) ?? mission;
   const reviewMissionId = finalLeg.id;
@@ -74,15 +82,27 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       ? db.select({ id: missionMessages.id, body: missionMessages.body, senderId: missionMessages.senderId, createdAt: missionMessages.createdAt })
           .from(missionMessages).where(eq(missionMessages.missionId, mission.id)).orderBy(asc(missionMessages.createdAt))
       : Promise.resolve([]),
-    db.select({ id: missionUpdates.id, message: missionUpdates.message, mediaUrl: missionUpdates.mediaUrl, createdAt: missionUpdates.createdAt })
-      .from(missionUpdates)
-      .where(and(eq(missionUpdates.missionId, mission.id), or(eq(missionUpdates.status, "submitted"), isNotNull(missionUpdates.mediaUrl))))
-      .orderBy(asc(missionUpdates.createdAt)),
-    db.select({ summary: missionPartResults.summary, submittedAt: missionPartResults.submittedAt }).from(missionPartResults).where(eq(missionPartResults.missionId, mission.id)).limit(1),
-    db.select({ rating: missionReviews.rating, review: missionReviews.review, tipCents: missionReviews.tipCents }).from(missionReviews).where(eq(missionReviews.missionId, reviewMissionId)).limit(1),
-    db.select().from(missionChecklistItems).where(eq(missionChecklistItems.missionId, mission.id)).orderBy(asc(missionChecklistItems.sequence)),
-    db.select().from(missionEvidence).where(eq(missionEvidence.missionId, mission.id)).orderBy(asc(missionEvidence.createdAt)),
-    db.select().from(missionChangeOrders).where(eq(missionChangeOrders.missionId, mission.id)).orderBy(asc(missionChangeOrders.createdAt)),
+    mission.scoutId || role !== "scout"
+      ? db.select({ id: missionUpdates.id, message: missionUpdates.message, mediaUrl: missionUpdates.mediaUrl, createdAt: missionUpdates.createdAt })
+          .from(missionUpdates)
+          .where(and(eq(missionUpdates.missionId, mission.id), or(eq(missionUpdates.status, "submitted"), isNotNull(missionUpdates.mediaUrl))))
+          .orderBy(asc(missionUpdates.createdAt))
+      : Promise.resolve([]),
+    mission.scoutId || role !== "scout"
+      ? db.select({ summary: missionPartResults.summary, submittedAt: missionPartResults.submittedAt }).from(missionPartResults).where(eq(missionPartResults.missionId, mission.id)).limit(1)
+      : Promise.resolve([]),
+    mission.scoutId || role !== "scout"
+      ? db.select({ rating: missionReviews.rating, review: missionReviews.review, tipCents: missionReviews.tipCents }).from(missionReviews).where(eq(missionReviews.missionId, reviewMissionId)).limit(1)
+      : Promise.resolve([]),
+    mission.scoutId || role !== "scout"
+      ? db.select().from(missionChecklistItems).where(eq(missionChecklistItems.missionId, mission.id)).orderBy(asc(missionChecklistItems.sequence))
+      : Promise.resolve([]),
+    mission.scoutId || role !== "scout"
+      ? db.select().from(missionEvidence).where(eq(missionEvidence.missionId, mission.id)).orderBy(asc(missionEvidence.createdAt))
+      : Promise.resolve([]),
+    mission.scoutId || role !== "scout"
+      ? db.select().from(missionChangeOrders).where(eq(missionChangeOrders.missionId, mission.id)).orderBy(asc(missionChangeOrders.createdAt))
+      : Promise.resolve([]),
     mission.scoutId ? db.select({ id: customerPreferredScouts.id }).from(customerPreferredScouts).where(and(eq(customerPreferredScouts.customerId, mission.customerId), eq(customerPreferredScouts.scoutId, mission.scoutId))).limit(1) : Promise.resolve([]),
   ]);
   const scout = scoutRows[0];
@@ -96,7 +116,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     : null;
   const latitude = mission.locationSharingActive && mission.scoutLatitude ? Math.round(Number(mission.scoutLatitude) * 1000) / 1000 : null;
   const longitude = mission.locationSharingActive && mission.scoutLongitude ? Math.round(Number(mission.scoutLongitude) * 1000) / 1000 : null;
-  const mapPrecision = role === "scout" && mission.scoutId !== user.id ? 3 : 6;
+  const mapPrecision = role === "scout" && mission.scoutId !== user.id ? planningMapPrecision : 6;
   const mapCoordinate = (value: string | null) => value === null ? null : Number(Number(value).toFixed(mapPrecision));
   const pickupMapLatitude = mapCoordinate(mission.pickupLatitude);
   const pickupMapLongitude = mapCoordinate(mission.pickupLongitude);
@@ -111,6 +131,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   return <MissionWorkspace
     role={role}
     canClaim={canClaim}
+    claimRequirement={claimRequirement}
     mission={{
       id: mission.id,
       type: mission.type,
@@ -123,17 +144,15 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       deliveryInstructions: showFullAddress ? mission.deliveryInstructions : null,
       scheduledFor: mission.scheduledFor?.toISOString() ?? null,
       timeZone: mission.timezone,
-      customerPriceCents: mission.customerPriceCents,
-      scoutPayoutCents: mission.scoutPayoutCents,
-      claimScoutPayoutCents: bundle?.scoutPayoutCents ?? mission.scoutPayoutCents,
-      claimCustomerPriceCents: bundle?.customerPriceCents ?? mission.customerPriceCents,
+      scoutPayoutCents: role !== "customer" ? mission.scoutPayoutCents : 0,
+      claimScoutPayoutCents: role !== "customer" ? bundle?.scoutPayoutCents ?? mission.scoutPayoutCents : 0,
       largeItem: mission.largeItem,
       routeDistanceMeters: mission.routeDistanceMeters,
       routeDurationSeconds: mission.routeDurationSeconds,
       routeSource: mission.routeSource,
       meetAuthorizedMinutes: mission.meetAuthorizedMinutes,
-      maximumCustomerPriceCents: mission.maximumCustomerPriceCents,
-      maximumScoutPayoutCents: mission.maximumScoutPayoutCents,
+      maximumCustomerPriceCents: role !== "scout" ? mission.maximumCustomerPriceCents : null,
+      maximumScoutPayoutCents: role !== "customer" ? mission.maximumScoutPayoutCents : null,
       billableStartedAt: mission.billableStartedAt?.toISOString() ?? null,
       billableEndedAt: mission.billableEndedAt?.toISOString() ?? null,
       billableMinutes: mission.billableMinutes,
@@ -145,7 +164,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       longitude,
       locationUpdatedAt: mission.scoutLocationUpdatedAt?.toISOString() ?? null,
       directionsUrl: mapDirectionsUrl(mission.type, pickupMapLatitude, pickupMapLongitude, dropoffMapLatitude, dropoffMapLongitude),
-      customerName: customer?.firstName || "Customer",
+      customerName: showFullAddress ? customer?.firstName || "Customer" : "Customer",
       scoutName: mission.scoutDisplayNameSnapshot
         ? mission.scoutDisplayNameSnapshot.trim().split(/\s+/)[0]
         : assignedProfile?.identityCheck === "clear" && assignedProfile.identityVerifiedName
@@ -169,10 +188,9 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       status: bundle.status,
       activeSequence: bundle.activeSequence,
       totalLegs: itinerary.length,
-      listCustomerPriceCents: bundle.listCustomerPriceCents,
-      bundleDiscountCents: bundle.bundleDiscountCents,
-      customerPriceCents: bundle.customerPriceCents,
-      scoutPayoutCents: bundle.scoutPayoutCents,
+      bundleDiscountCents: role !== "scout" ? bundle.bundleDiscountCents : 0,
+      customerPriceCents: role !== "scout" ? bundle.customerPriceCents : 0,
+      scoutPayoutCents: role !== "customer" ? bundle.scoutPayoutCents : 0,
     } : null}
     itinerary={itinerary.map((leg) => ({
       id: leg.id,
@@ -221,8 +239,8 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       id: order.id,
       status: order.status,
       description: order.description,
-      customerDeltaCents: order.customerDeltaCents,
-      scoutDeltaCents: order.scoutDeltaCents,
+      customerDeltaCents: role !== "scout" ? order.customerDeltaCents : 0,
+      scoutDeltaCents: role !== "customer" ? order.scoutDeltaCents : 0,
       proposedByMe: order.proposedByUserId === user.id,
       awaitingPayment: order.status === "pending" && Boolean(order.approvedByUserId),
       expiresAt: order.expiresAt?.toISOString() ?? null,

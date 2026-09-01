@@ -5,14 +5,14 @@ export function ScoutPayoutRequiredBanner({ applicationApproved }: { application
   return <Link
     className="scout-payout-required-banner"
     href="/dashboard/scout/earnings"
-    aria-label="Finish Stripe payout setup to unlock matching missions"
+    aria-label="Finish Stripe payout setup before claiming a mission"
   >
     <span className="scout-payout-required-icon"><IconWallet aria-hidden="true" size={25} /></span>
     <div>
-      <strong>Finish payout setup to unlock missions</strong>
+      <strong>Finish payout setup before claiming</strong>
       <p>{applicationApproved
-        ? "Open missions stay hidden until Stripe confirms where Send a Scout can send your earnings."
-        : "Matching missions appear after your application is approved and Stripe confirms where Send a Scout can send your earnings."}</p>
+        ? "You can browse matching opportunities now. Claiming unlocks after Stripe confirms where Send a Scout can send your earnings."
+        : "You can browse matching opportunities now. Claiming unlocks after approval and Stripe payout readiness."}</p>
     </div>
     <span className="scout-payout-required-action">Set up payouts <IconArrowRight aria-hidden="true" size={17} /></span>
   </Link>;
