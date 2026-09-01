@@ -6,6 +6,7 @@ import { missionBundles, missions, notifications, scoutProfiles } from "@/db/sch
 import { requireAppUser } from "@/lib/app-user";
 import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 
@@ -23,8 +24,9 @@ export default async function ScoutDashboard() {
   const stripeLivemode = getStripeLivemode();
   const payoutReady = scoutConnectReady(profile, stripeLivemode);
   const handbookAccepted = hasCurrentScoutHandbookAcceptance(profile);
+  const canBrowseOpen = scoutCanBrowseOpenMissions(profile);
   const [rows, alertRows] = await Promise.all([
-    profile.status === "approved" && payoutReady && handbookAccepted
+    canBrowseOpen
       ? db.select().from(missions).where(and(isNull(missions.archivedAt), or(
         eq(missions.scoutId, user.id),
         and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(

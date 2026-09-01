@@ -89,30 +89,35 @@ test("the handbook stays accessible from every Scout dashboard navigation", () =
   assert.match(handbookPage, /handbookAcknowledgement/);
 });
 
-test("overview and Mission Board expose assigned work but gate open missions on the current handbook", () => {
+test("overview and Mission Board expose matching open missions while the handbook gates claiming", () => {
   for (const page of [scoutOverview, missionBoard]) {
     assert.match(page, /hasCurrentScoutHandbookAcceptance\(profile\)/);
+    assert.match(page, /scoutCanBrowseOpenMissions\(profile\)/);
     assert.match(page, /eq\(missions\.scoutId, user\.id\)/);
     assert.match(page, /eq\(missions\.status, "open"\)/);
   }
   assert.match(scoutOverview, /scoutHandbookAccepted=\{handbookAccepted\}/);
-  assert.match(desktopDashboard, /!scoutHandbookAccepted && <ScoutHandbookRequiredBanner/);
+  assert.match(desktopDashboard, /canBrowseOpen && !scoutHandbookAccepted && <ScoutHandbookRequiredBanner/);
   assert.match(missionBoard, /ScoutHandbookRequiredBanner/);
-  assert.match(missionBoard, /Review(?: and acknowledge)? the (?:current )?Scout Handbook before open missions appear\./);
-  assert.match(missionBoard, /handbookAccepted[^\n]*payoutReady|payoutReady[^\n]*handbookAccepted/);
+  assert.doesNotMatch(missionBoard, /before open missions appear/i);
+  assert.match(missionBoard, /Browse matching opportunities while you finish onboarding/);
+  assert.match(desktopDashboard, /Review the Scout Handbook before claiming one/);
 });
 
-test("direct mission and map access gate unassigned discovery while preserving assigned access", () => {
+test("direct mission and approximate map allow browse-only Scouts while preserving claim gates", () => {
   const assignedMissionBranch = missionPage.indexOf("mission.scoutId === user.id");
   const openMissionBranch = missionPage.indexOf('mission.status === "open"');
-  const handbookMissionGate = missionPage.indexOf("hasCurrentScoutHandbookAcceptance(profile)");
-  assert.ok(assignedMissionBranch >= 0 && assignedMissionBranch < openMissionBranch && openMissionBranch < handbookMissionGate);
-  assert.match(missionPage, /redirect\(`\/dashboard\/scout\/handbook\?next=\$\{encodeURIComponent\(currentPath\)\}`\)/);
+  const browseMissionGate = missionPage.indexOf("scoutCanBrowseOpenMissions(profile)");
+  assert.ok(assignedMissionBranch >= 0 && assignedMissionBranch < openMissionBranch && openMissionBranch < browseMissionGate);
+  assert.match(missionPage, /canClaim = profile\.status === "approved"[\s\S]*scoutReadyForApproval\(\{ \.\.\.profile, \.\.\.user \}, LEGAL_VERSION, getStripeLivemode\(\)\)/);
+  assert.doesNotMatch(missionPage, /redirect\(`\/dashboard\/scout\/handbook/);
 
   const assignedMapAccess = missionMap.indexOf("mission.scoutId === user.id");
   const openMapBranch = missionMap.indexOf('mission.status === "open"');
-  const handbookMapGate = missionMap.indexOf("hasCurrentScoutHandbookAcceptance(profile)");
-  assert.ok(assignedMapAccess >= 0 && assignedMapAccess < openMapBranch && openMapBranch < handbookMapGate);
+  const browseMapGate = missionMap.indexOf("scoutCanBrowseOpenMissions(profile)");
+  assert.ok(assignedMapAccess >= 0 && assignedMapAccess < openMapBranch && openMapBranch < browseMapGate);
+  assert.doesNotMatch(missionMap, /hasCurrentScoutHandbookAcceptance|scoutConnectReady/);
+  assert.match(missionMap, /planningPrecision = profile\?\.status === "approved" \? 3 : 2/);
   assert.match(missionMap, /if \(!allowed\) return NextResponse\.json\([^\n]*status: 403/);
 });
 

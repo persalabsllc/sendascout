@@ -8,13 +8,16 @@ const dashboard = readFileSync(new URL("../components/dashboard.tsx", import.met
 const payoutBanner = readFileSync(new URL("../components/scout-payout-required-banner.tsx", import.meta.url), "utf8");
 const stripeConnectActions = readFileSync(new URL("../app/actions/stripe-connect.ts", import.meta.url), "utf8");
 const stripeConnectService = readFileSync(new URL("../lib/stripe-connect-service.ts", import.meta.url), "utf8");
+const missionDetailPage = readFileSync(new URL("../app/dashboard/missions/[id]/page.tsx", import.meta.url), "utf8");
+const missionWorkspace = readFileSync(new URL("../components/mission-workspace.tsx", import.meta.url), "utf8");
 
-test("Scout dashboard uses the same Stripe readiness gate for missions and its setup banner", () => {
+test("Scout dashboard exposes matching missions while Stripe readiness gates claiming", () => {
   assert.match(scoutDashboardPage, /const payoutReady = scoutConnectReady\(profile, stripeLivemode\)/);
-  assert.match(scoutDashboardPage, /profile\.status === "approved" && payoutReady/);
+  assert.match(scoutDashboardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(scoutDashboardPage, /canBrowseOpen[\s\S]*eq\(missions\.status, "open"\)[\s\S]*eq\(missions\.paymentStatus, "paid"\)/);
   assert.match(scoutDashboardPage, /scoutPayoutReady=\{payoutReady\}/);
-  assert.match(dashboard, /!scoutPayoutReady && <ScoutPayoutRequiredBanner/);
-  assert.match(dashboard, /Finish payout setup before matching missions can appear\./);
+  assert.match(dashboard, /canBrowseOpen && !scoutPayoutReady && <ScoutPayoutRequiredBanner/);
+  assert.match(dashboard, /Finish payout setup before claiming one\./);
 });
 
 test("Refreshing Stripe status immediately refreshes both Scout mission surfaces", () => {
@@ -28,13 +31,14 @@ test("A legacy approved Scout receives existing mission alerts when payouts beco
   assert.match(stripeConnectService, /await alertScoutToOpenMissions\(updated\.userId\)/);
 });
 
-test("Mission Board makes an incomplete payout account an explicit clickable blocker", () => {
-  assert.match(missionBoardPage, /const payoutReady = Boolean\(profile && scoutConnectReady\(profile, stripeLivemode\)\)/);
-  assert.match(missionBoardPage, /!payoutReady && <ScoutPayoutRequiredBanner/);
-  assert.match(missionBoardPage, /Finish Stripe payout setup before open missions appear\./);
+test("Mission Board makes an incomplete payout account an explicit claim blocker", () => {
+  assert.match(missionBoardPage, /const payoutReady = scoutConnectReady\(profile, stripeLivemode\)/);
+  assert.match(missionBoardPage, /const canBrowseOpen = scoutCanBrowseOpenMissions\(profile\)/);
+  assert.match(missionBoardPage, /canBrowseOpen && !payoutReady && <ScoutPayoutRequiredBanner/);
+  assert.doesNotMatch(missionBoardPage, /before open missions appear/i);
   assert.match(payoutBanner, /href="\/dashboard\/scout\/earnings"/);
-  assert.match(payoutBanner, /Finish payout setup to unlock missions/);
-  assert.match(payoutBanner, /Open missions stay hidden until Stripe confirms/);
+  assert.match(payoutBanner, /Finish payout setup before claiming/);
+  assert.match(payoutBanner, /You can browse matching opportunities now/);
   assert.match(payoutBanner, /Set up payouts/);
 });
 
@@ -43,9 +47,12 @@ test("Scout mission amounts emphasize earnings without comparing customer pricin
   assert.ok(missionBoardPage.includes("Each amount shown is what you&apos;ll earn for completing that mission."));
   assert.ok(missionBoardPage.includes("You&apos;ll earn"));
   assert.ok(dashboard.includes("You&apos;ll earn"));
+  assert.match(missionDetailPage, /customerDeltaCents: role !== "scout" \? order\.customerDeltaCents : 0/);
+  assert.match(missionWorkspace, /role === "scout" \? `You’ll earn: \+\$\{money\(order\.scoutDeltaCents\)\}` : `Additional charge/);
+  assert.doesNotMatch(missionWorkspace, /Customer: \+\{money\(order\.customerDeltaCents\)\} · Scout payout/);
 });
 
 test("Payout banner explains that normal approval and matching rules still apply", () => {
   assert.match(payoutBanner, /applicationApproved/);
-  assert.match(payoutBanner, /Matching missions appear after your application is approved/);
+  assert.match(payoutBanner, /Claiming unlocks after approval and Stripe payout readiness/);
 });

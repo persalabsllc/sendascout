@@ -1,9 +1,12 @@
 "use server";
 
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { requireAppUser } from "@/lib/app-user";
-import { createScoutStripeAccountLink, createScoutStripeDashboardLink, syncScoutStripeAccount, type ScoutPayoutOwnerType } from "@/lib/stripe-connect-service";
+import { getDb } from "@/db";
+import { scoutProfiles } from "@/db/schema";
+import { requireAdminUser, requireAppUser } from "@/lib/app-user";
+import { createScoutStripeAccountLink, createScoutStripeDashboardLink, syncScoutStripeAccount, syncStripeAccountById, type ScoutPayoutOwnerType } from "@/lib/stripe-connect-service";
 
 type StripeLinkResult = { ok: true; url: string } | { ok: false; error: string };
 
@@ -36,6 +39,33 @@ export async function refreshScoutStripeStatus(): Promise<{ ok: true } | { ok: f
     unstable_rethrow(error);
     console.error("Scout Stripe status could not refresh", error);
     return { ok: false, error: "Stripe payout status could not refresh. Please try again or contact support." };
+  }
+}
+
+export async function adminRefreshScoutStripeStatus(profileId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await requireAdminUser();
+    const [profile] = await getDb().select({
+      id: scoutProfiles.id,
+      stripeAccountId: scoutProfiles.stripeAccountId,
+    }).from(scoutProfiles).where(eq(scoutProfiles.id, profileId)).limit(1);
+    if (!profile) return { ok: false, error: "Scout profile not found." };
+    if (!profile.stripeAccountId) return { ok: false, error: "This Scout has not created a Stripe payout account yet." };
+
+    const synced = await syncStripeAccountById(profile.stripeAccountId);
+    if (!synced || synced.id !== profile.id) return { ok: false, error: "The Scout payout account could not be synchronized safely." };
+
+    revalidatePath("/control-room");
+    revalidatePath("/control-room/scouts");
+    revalidatePath("/dashboard/scout");
+    revalidatePath("/dashboard/scout/earnings");
+    revalidatePath("/dashboard/scout/missions");
+    revalidatePath("/dashboard/scout/settings");
+    return { ok: true };
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("Control Room could not refresh Scout Stripe status", { profileId, error });
+    return { ok: false, error: "Stripe payout status could not be refreshed. Try again or check the production logs." };
   }
 }
 
