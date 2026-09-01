@@ -1,9 +1,10 @@
-import { and, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { Dashboard, type DashboardMission, type DashboardNotification } from "@/components/dashboard";
 import { getDb } from "@/db";
 import { missionBundles, missions, notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
@@ -21,8 +22,9 @@ export default async function ScoutDashboard() {
   const profile = profileRow.profile;
   const stripeLivemode = getStripeLivemode();
   const payoutReady = scoutConnectReady(profile, stripeLivemode);
+  const handbookAccepted = hasCurrentScoutHandbookAcceptance(profile);
   const [rows, alertRows] = await Promise.all([
-    profile.status === "approved" && payoutReady
+    profile.status === "approved" && payoutReady && handbookAccepted
       ? db.select().from(missions).where(and(isNull(missions.archivedAt), or(
         eq(missions.scoutId, user.id),
         and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
@@ -33,7 +35,12 @@ export default async function ScoutDashboard() {
         )),
       ))).orderBy(desc(missions.createdAt))
       : db.select().from(missions).where(and(isNull(missions.archivedAt), eq(missions.scoutId, user.id))).orderBy(desc(missions.createdAt)),
-    db.select().from(notifications).where(and(eq(notifications.recipientUserId, user.id), eq(notifications.channel, "in_app"), isNull(notifications.readAt))).orderBy(desc(notifications.createdAt)).limit(5),
+    db.select().from(notifications).where(and(
+      eq(notifications.recipientUserId, user.id),
+      eq(notifications.channel, "in_app"),
+      isNull(notifications.readAt),
+      handbookAccepted ? undefined : ne(notifications.kind, "new_mission"),
+    )).orderBy(desc(notifications.createdAt)).limit(5),
   ]);
   const bundleIds = [...new Set(rows.flatMap((mission) => mission.bundleId ? [mission.bundleId] : []))];
   const [bundleRows, bundleLegs] = bundleIds.length
@@ -74,11 +81,12 @@ export default async function ScoutDashboard() {
   const missionById = new Map(visibleRows.map((mission) => [mission.id, mission]));
   const dashboardNotifications: DashboardNotification[] = alertRows
     .filter((item) => {
+      if (item.kind === "new_mission" && !handbookAccepted) return false;
       if (!item.missionId) return true;
       const mission = missionById.get(item.missionId);
       if (item.kind === "new_mission") return mission?.status === "open";
       return !mission || !["completed", "cancelled", "disputed"].includes(mission.status);
     })
     .map((item) => ({ id: item.id, title: item.title, body: item.body, missionId: item.missionId, createdAt: item.createdAt.toISOString() }));
-  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} scoutPayoutReady={payoutReady} />;
+  return <Dashboard role="scout" userName={name} initials={initials} missions={dashboardMissions} notifications={dashboardNotifications} profileStatus={profile.status} showScoutBanner={profileRow.showApprovalBanner} scoutPayoutReady={payoutReady} scoutHandbookAccepted={handbookAccepted} />;
 }

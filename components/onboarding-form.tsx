@@ -7,12 +7,14 @@ import { upload } from "@vercel/blob/client";
 import { IconArrowLeft, IconArrowRight, IconCamera, IconCheck, IconCircleCheck, IconLock, IconPlus, IconTrash } from "@tabler/icons-react";
 import { createMission, createScoutApplication, getMissionPriceQuote, type MissionCreationQuote, type MissionInput, type ScoutInput } from "@/app/actions/onboarding";
 import { saveScoutHeadshot } from "@/app/actions/profile";
+import { SCOUT_HANDBOOK_ACKNOWLEDGEMENT, SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 import { formatDateTime, localDateTimeToUtc } from "@/lib/time";
 import { defaultMissionTimeZoneForState, missionTimeZoneLabel, US_TIME_ZONE_OPTIONS } from "@/lib/us-time-zones";
 import { Brand } from "./brand";
+import { ScoutHandbookContent } from "./scout-handbook-content";
 
 type Mode = "customer" | "scout";
-const scoutSteps = ["You", "Area", "Setup", "Review"];
+const scoutSteps = ["You", "Area", "Setup", "Handbook", "Review"];
 
 const emptyMission: MissionInput = {
   type: "see", address: "", addressLine2: "", city: "", state: "", zip: "",
@@ -25,7 +27,7 @@ const emptyMission: MissionInput = {
   addMoveLeg: false, bundleDropoffName: "", bundleDropoffAddress: "", bundleDropoffAddressLine2: "", bundleDropoffCity: "", bundleDropoffState: "", bundleDropoffZip: "", bundleDeliveryInstructions: "", bundleTitle: "", bundleInstructions: "", bundleLargeItem: false,
   bundleDeliveryMethod: "leave_at_location", bundleDeliveryPinRequired: false, bundleDeliveryPin: "",
 };
-const emptyScout: ScoutInput = { firstName: "", lastName: "", phone: "", homeZip: "", radius: 25, vehicleType: "", experience: "", canSee: true, canMove: true, canMeet: true, consent: false, smsNotificationsEnabled: false };
+const emptyScout: ScoutInput = { firstName: "", lastName: "", phone: "", homeZip: "", radius: 25, vehicleType: "", experience: "", canSee: true, canMove: true, canMeet: true, consent: false, smsNotificationsEnabled: false, handbookAccepted: false };
 
 export type PreferredScoutOption = { id: string; firstName: string; completedMissions: number };
 
@@ -68,13 +70,17 @@ export function OnboardingForm({ mode, initialMissionType = "see", initialMissio
     : mission.type === "meet"
       ? ["What kind of mission?", "Where should the Scout meet or wait?", "Who are they meeting, and what should happen?", "Add reports, repeats or a delivery", "Review your Meet It mission"]
       : ["What kind of mission?", "Where should the Scout go?", "What should the Scout inspect?", "Choose report and repeat options", "Review your See It mission"];
-  const heading = customer ? customerHeading : ["Let’s get to know you", "Where do you want to Scout?", "Set up your Scout profile", "Review your application"];
+  const heading = customer ? customerHeading : ["Let’s get to know you", "Where do you want to Scout?", "Set up your Scout profile", "Review the Scout Handbook", "Review your application"];
 
   function advance(event: FormEvent) {
     event.preventDefault();
     setError("");
     if (!customer && step >= 2 && !scoutHeadshot) {
       setError("Add a clear profile headshot before finishing your Scout application.");
+      return;
+    }
+    if (!customer && step === 3 && !scout.handbookAccepted) {
+      setError("Review the Scout Handbook and confirm your acknowledgment before continuing.");
       return;
     }
     if (step < steps.length - 1) {
@@ -259,8 +265,9 @@ function ScoutStep({ step, value, setValue, email, headshot, onHeadshot }: { ste
   if (step === 0) return <><div className="field-row"><Field label="First name" placeholder="Jordan" value={value.firstName} onChange={(event) => set("firstName", event.target.value)} /><Field label="Last name" placeholder="Taylor" value={value.lastName} onChange={(event) => set("lastName", event.target.value)} /></div><Field label="Account email" type="email" value={email} readOnly required={false} /><Field label="Mobile number" type="tel" placeholder="555-123-4567" value={value.phone} onChange={(event) => set("phone", event.target.value)} /></>;
   if (step === 1) return <><Field label="Home ZIP code" placeholder="78701" inputMode="numeric" value={value.homeZip} onChange={(event) => set("homeZip", event.target.value)} /><label className="field"><span>How far are you willing to travel?</span><select required value={value.radius} onChange={(event) => set("radius", Number(event.target.value))}><option value={10}>10 miles</option><option value={25}>25 miles</option><option value={50}>50 miles</option><option value={75}>75+ miles</option></select></label><div className="check-grid"><Check label="See It missions" checked={value.canSee} onChange={(checked) => set("canSee", checked)} /><Check label="Move It missions" checked={value.canMove} onChange={(checked) => set("canMove", checked)} /><Check label="Meet It missions" checked={value.canMeet} onChange={(checked) => set("canMeet", checked)} /></div></>;
   if (step === 2) return <><label className="field"><span>Vehicle access</span><select required value={value.vehicleType} onChange={(event) => set("vehicleType", event.target.value)}><option value="" disabled>Select your vehicle</option><option>Car</option><option>SUV</option><option>Pickup truck</option><option>Van</option><option>No vehicle</option></select></label><Field label="Gig-work experience (optional)" required={false} placeholder="DoorDash, Uber, field inspections, courier work…" value={value.experience} onChange={(event) => set("experience", event.target.value)} /><div className="headshot-editor onboarding-headshot"><div className="headshot-preview"><IconCamera size={34} /></div><div><h3>Profile headshot <span aria-hidden="true">*</span></h3><p>A clear, current JPG, PNG, or WEBP photo of your face is required before Control Room can approve your application. Maximum 5 MB.</p><label className="button button-ghost button-small">{headshot ? "Change photo" : "Choose photo"}<input type="file" accept="image/jpeg,image/png,image/webp" required={!headshot} onChange={(event) => onHeadshot(event.target.files?.[0] ?? null)} /></label>{headshot && <small className="selected-file"><IconCheck size={15} /> {headshot.name}</small>}</div></div><label className="check notification-check"><input type="checkbox" checked={value.smsNotificationsEnabled} onChange={(event) => set("smsNotificationsEnabled", event.target.checked)} /><span><strong>Text mission alerts (optional)</strong><small>By checking this box, I agree to receive transactional mission and account texts from Send a Scout. Message frequency varies. Msg &amp; data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of participation. See <Link href="/terms" target="_blank">Terms</Link> and <Link href="/privacy" target="_blank">Privacy</Link>.</small></span></label><label className="check consent"><input required type="checkbox" checked={value.consent} onChange={(event) => set("consent", event.target.checked)} /> I am at least 18 and agree to identity and background verification before accepting missions.</label></>;
+  if (step === 3) return <div className="handbook-reader-card"><div className="handbook-reader-scroll" tabIndex={0} aria-label="Scrollable Scout Handbook"><ScoutHandbookContent variant="reader" /></div><div className="handbook-acceptance-form"><label className="handbook-acceptance-check"><input required type="checkbox" checked={value.handbookAccepted} onChange={(event) => set("handbookAccepted", event.target.checked)} /><span>{SCOUT_HANDBOOK_ACKNOWLEDGEMENT}</span></label><small>The current handbook will remain available from your Scout dashboard.</small></div></div>;
   const access = [value.canSee && "See It", value.canMove && "Move It", value.canMeet && "Meet It"].filter(Boolean).join(" · ");
-  return <div className="review-box"><Review label="Delivery zone" value={`${value.homeZip} · within ${value.radius} miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Profile photo" value={headshot?.name ?? "Required before submission"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>You’ll see matching missions anywhere inside your selected delivery zone. Submitting does not create an employment relationship or guarantee missions.</p></div>;
+  return <div className="review-box"><Review label="Delivery zone" value={`${value.homeZip} · within ${value.radius} miles`} /><Review label="Mission access" value={access || "None selected"} /><Review label="Profile photo" value={headshot?.name ?? "Required before submission"} /><Review label="Scout Handbook" value={value.handbookAccepted ? `Reviewed and acknowledged · ${SCOUT_HANDBOOK_VERSION}` : "Acknowledgment required"} /><Review label="Registration cost" value="$0" /><Review label="Payout options" value="Same-day options planned" /><p>You’ll see matching missions anywhere inside your selected delivery zone. Submitting does not create an employment relationship or guarantee missions.</p></div>;
 }
 
 function Field({ label, required = true, ...props }: { label: string; required?: boolean } & React.InputHTMLAttributes<HTMLInputElement>) { return <label className="field"><span>{label}</span><input required={required} {...props} /></label>; }

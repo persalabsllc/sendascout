@@ -5,6 +5,7 @@ import { SignOutButton } from "@clerk/nextjs";
 import {
   IconDashboard,
   IconBell,
+  IconBook2,
   IconBuildingStore,
   IconCalendarRepeat,
   IconHome,
@@ -38,6 +39,7 @@ export function MobileDashboardNav({ role, name, initials }: MobileDashboardNavP
     ? [
         { href: "/dashboard/scout", label: "Overview", icon: IconDashboard },
         { href: "/dashboard/scout/missions", label: "Mission board", icon: IconTargetArrow },
+        { href: "/dashboard/scout/handbook", label: "Scout Handbook", icon: IconBook2 },
         { href: "/dashboard/scout/earnings", label: "Earnings & payouts", icon: IconWallet },
         { href: "/dashboard/scout/settings", label: "Profile & settings", icon: IconSettings },
         { href: "/dashboard/notifications", label: "Notifications", icon: IconBell },

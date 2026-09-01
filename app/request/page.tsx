@@ -6,6 +6,7 @@ import { OnboardingForm, type PreferredScoutOption } from "@/components/onboardi
 import { getDb } from "@/db";
 import { customerPreferredScouts, missionChecklistItems, missionRecurrences, missions, missionTemplates, scoutProfiles, users } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 import { dateTimeLocalValue } from "@/lib/time";
 
 type RequestSearchParams = { type?: string; repeat?: string; template?: string; recurrence?: string; occurrence?: string };
@@ -187,13 +188,25 @@ async function loadPreferredScouts(db: ReturnType<typeof getDb>, customerId: str
       .from(missions)
       .innerJoin(users, eq(missions.scoutId, users.id))
       .innerJoin(scoutProfiles, eq(scoutProfiles.userId, users.id))
-      .where(and(eq(missions.customerId, customerId), eq(missions.status, "completed"), isNotNull(missions.scoutId), eq(scoutProfiles.status, "approved")))
+      .where(and(
+        eq(missions.customerId, customerId),
+        eq(missions.status, "completed"),
+        isNotNull(missions.scoutId),
+        eq(scoutProfiles.status, "approved"),
+        eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
+        isNotNull(scoutProfiles.handbookAcceptedAt),
+      ))
       .orderBy(desc(missions.completedAt)),
     db.select({ id: users.id, firstName: users.firstName, completedMissions: scoutProfiles.completedMissions })
       .from(customerPreferredScouts)
       .innerJoin(users, eq(customerPreferredScouts.scoutId, users.id))
       .innerJoin(scoutProfiles, eq(scoutProfiles.userId, users.id))
-      .where(and(eq(customerPreferredScouts.customerId, customerId), eq(scoutProfiles.status, "approved"))),
+      .where(and(
+        eq(customerPreferredScouts.customerId, customerId),
+        eq(scoutProfiles.status, "approved"),
+        eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
+        isNotNull(scoutProfiles.handbookAcceptedAt),
+      )),
   ]);
   const unique = new Map<string, PreferredScoutOption>();
   for (const scout of [...saved, ...history]) unique.set(scout.id, { id: scout.id, firstName: scout.firstName?.trim() || "Preferred Scout", completedMissions: scout.completedMissions });

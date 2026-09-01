@@ -1,21 +1,35 @@
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
-import { desc, eq, and } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { IconArrowLeft, IconBell } from "@tabler/icons-react";
 import { Brand } from "@/components/brand";
 import { MobileDashboardNav } from "@/components/mobile-dashboard-nav";
 import { NotificationCenter } from "@/components/notification-center";
 import { getDb } from "@/db";
-import { notifications } from "@/db/schema";
+import { notifications, scoutProfiles } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
+import { hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 
 export const metadata = { title: "Notifications | Send a Scout", robots: { index: false, follow: false } };
 
 export default async function NotificationsPage() {
   const user = await requireAppUser("customer");
   const role = user.role === "scout" ? "scout" as const : "customer" as const;
-  const rows = await getDb().select().from(notifications)
-    .where(and(eq(notifications.recipientUserId, user.id), eq(notifications.channel, "in_app")))
+  const db = getDb();
+  const scoutProfileRows = role === "scout"
+    ? await db.select({
+      handbookVersion: scoutProfiles.handbookVersion,
+      handbookAcceptedAt: scoutProfiles.handbookAcceptedAt,
+    }).from(scoutProfiles).where(eq(scoutProfiles.userId, user.id)).limit(1)
+    : [];
+  const handbookAccepted = role !== "scout" || hasCurrentScoutHandbookAcceptance(scoutProfileRows[0]);
+  const visibilityFilter = handbookAccepted ? undefined : ne(notifications.kind, "new_mission");
+  const rows = await db.select().from(notifications)
+    .where(and(
+      eq(notifications.recipientUserId, user.id),
+      eq(notifications.channel, "in_app"),
+      visibilityFilter,
+    ))
     .orderBy(desc(notifications.createdAt)).limit(100);
   const name = user.firstName || (role === "scout" ? "Scout" : "Customer");
   const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase() || "SA";

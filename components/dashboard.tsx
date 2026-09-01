@@ -2,12 +2,13 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import {
   IconArrowRight, IconBell, IconCamera, IconCircleCheck, IconClock, IconCoin,
-  IconBuildingStore, IconCalendarRepeat, IconDashboard, IconLifebuoy, IconMapPin, IconPlus, IconRoute, IconSettings,
+  IconBook2, IconBuildingStore, IconCalendarRepeat, IconDashboard, IconLifebuoy, IconMapPin, IconPlus, IconRoute, IconSettings,
   IconShieldCheck, IconTargetArrow, IconUser, IconWallet,
 } from "@tabler/icons-react";
 import { Brand } from "./brand";
 import { MobileDashboardNav } from "./mobile-dashboard-nav";
 import { ScoutPayoutRequiredBanner } from "./scout-payout-required-banner";
+import { ScoutHandbookRequiredBanner } from "./scout-handbook-required-banner";
 
 type Role = "customer" | "scout";
 type MissionKind = "see" | "move" | "meet";
@@ -42,6 +43,7 @@ export function Dashboard({
   profileStatus = "applicant",
   showScoutBanner = true,
   scoutPayoutReady = true,
+  scoutHandbookAccepted = true,
 }: {
   role: Role;
   userName: string;
@@ -51,6 +53,7 @@ export function Dashboard({
   profileStatus?: string;
   showScoutBanner?: boolean;
   scoutPayoutReady?: boolean;
+  scoutHandbookAccepted?: boolean;
 }) {
   const scout = role === "scout";
   const scoutMission = scout
@@ -64,6 +67,7 @@ export function Dashboard({
         <nav>
           <Link className="active" href={scout ? "/dashboard/scout" : "/dashboard/customer"}><IconDashboard size={20} /> Overview</Link>
           <Link href={scout ? "/dashboard/scout/missions" : "/dashboard/customer"}><IconTargetArrow size={20} /> {scout ? "Mission board" : "My missions"}</Link>
+          {scout && <Link href="/dashboard/scout/handbook"><IconBook2 size={20} /> Scout Handbook</Link>}
           {!scout && <Link href="/dashboard/customer/saved"><IconCalendarRepeat size={20} /> Saved &amp; recurring</Link>}
           {!scout && <Link href="/dashboard/customer/business"><IconBuildingStore size={20} /> Business</Link>}
           <Link href={scout ? "/dashboard/scout/earnings" : "/dashboard/customer/payments"}><IconWallet size={20} /> {scout ? "Earnings" : "Payments"}</Link>
@@ -89,7 +93,7 @@ export function Dashboard({
               : <Link className="button" href="/request">New mission <IconPlus size={19} /></Link>}
           </div>
           {notifications.length > 0 && <section className="notification-strip"><div><IconBell size={21} /><strong>{notifications[0].title}</strong><p>{notifications[0].body}</p></div><Link href={notifications[0].missionId ? `/dashboard/missions/${notifications[0].missionId}` : "/dashboard/notifications"}>{notifications[0].missionId ? "Open" : "View all"} <IconArrowRight size={17} /></Link></section>}
-          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} scoutPayoutReady={scoutPayoutReady} /> : <CustomerOverview missions={missions} />}
+          {scout ? <ScoutOverview missions={missions} profileStatus={profileStatus} showScoutBanner={showScoutBanner} scoutPayoutReady={scoutPayoutReady} scoutHandbookAccepted={scoutHandbookAccepted} /> : <CustomerOverview missions={missions} />}
         </div>
       </section>
     </main>
@@ -117,17 +121,18 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
   </>;
 }
 
-function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutReady }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean; scoutPayoutReady: boolean }) {
+function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutReady, scoutHandbookAccepted }: { missions: DashboardMission[]; profileStatus: string; showScoutBanner: boolean; scoutPayoutReady: boolean; scoutHandbookAccepted: boolean }) {
   const available = missions.filter((mission) => mission.status === "open" && !mission.assigned);
   const active = missions.filter((mission) => mission.assigned && !["completed", "cancelled", "disputed"].includes(mission.status));
   const completed = missions.filter((mission) => mission.assigned && mission.status === "completed");
   const missionBoard = [...active, ...available];
   const earned = completed.reduce((sum, mission) => sum + (mission.payoutCents ?? 0), 0);
   return <>
-    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : "Founding Scout application"}</strong><p>{profileStatus === "approved" ? scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "Your application is approved. Finish payout setup before matching missions can appear." : "Your application is saved. Identity and background verification will open before launch."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
+    {showScoutBanner && <div className="scout-banner"><span><IconShieldCheck size={26} /></span><div><strong>{profileStatus === "approved" ? "Application approved" : "Founding Scout application"}</strong><p>{profileStatus === "approved" ? !scoutHandbookAccepted ? "Your application is approved. Review the Scout Handbook to unlock matching missions." : scoutPayoutReady ? "You’re approved and can claim matching missions in your delivery zone." : "Your application is approved. Finish payout setup before matching missions can appear." : "Your application is saved. Identity and background verification will open before launch."}</p></div><span className="status">{statusLabel(profileStatus)}</span></div>}
+    {!scoutHandbookAccepted && <ScoutHandbookRequiredBanner />}
     {!scoutPayoutReady && <ScoutPayoutRequiredBanner applicationApproved={profileStatus === "approved"} />}
     <div className="stat-grid scout-stats">
-      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note="Open missions in your area" />
+      <Stat icon={IconTargetArrow} label="Nearby missions" value={String(available.length)} note={scoutHandbookAccepted ? "Open missions in your area" : "Review the handbook to unlock"} />
       <Stat icon={IconCoin} label="Earned" value={money(earned)} note="Completed mission payouts" />
       <Stat icon={IconRoute} label="Completed" value={String(completed.length)} note={completed.length ? "Your completed missions" : "Ready for your first"} />
     </div>
@@ -136,7 +141,7 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutRe
       {missionBoard.length ? <div className="mission-list scout-list">{missionBoard.map((mission) => {
         const Icon = iconFor(mission.type);
         return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>You&apos;ll earn</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
-      })}</div> : <EmptyMissions />}
+      })}</div> : scoutHandbookAccepted ? <EmptyMissions /> : <div className="dashboard-empty"><IconBook2 size={30} /><h3>Review the Scout Handbook</h3><p>Acknowledge the current handbook to see and claim matching open missions.</p><Link className="button button-small" href="/dashboard/scout/handbook">Review handbook</Link></div>}
     </section>
   </>;
 }

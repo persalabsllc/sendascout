@@ -1,8 +1,9 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { getDb } from "@/db";
 import {
@@ -14,6 +15,7 @@ import {
   missionTemplates,
   missionUpdates,
   payments,
+  scoutHandbookAcceptances,
   scoutProfiles,
   users,
 } from "@/db/schema";
@@ -22,6 +24,7 @@ import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pri
 import { hashDeliveryPin, normalizeDeliveryPin } from "@/lib/delivery-pin";
 import { calculateBundlePricing, calculateDiscountedMissionPrice, nextRecurrenceDate } from "@/lib/mission-features";
 import { isMissionEligibleForScout } from "@/lib/scout-matching";
+import { SCOUT_HANDBOOK_VERSION } from "@/lib/scout-handbook";
 import { localDateTimeToUtc } from "@/lib/time";
 import { isMissionTimeZone, normalizeMissionTimeZone } from "@/lib/us-time-zones";
 import { createHostedCheckoutForPayment, ensureStripeCustomer } from "@/lib/stripe-payments";
@@ -115,6 +118,7 @@ export type ScoutInput = {
   canMeet: boolean;
   consent: boolean;
   smsNotificationsEnabled: boolean;
+  handbookAccepted: boolean;
 };
 
 export type OnboardingResult = { ok: true; id: string; scoutUserId?: string; checkoutUrl?: string } | { ok: false; error: string };
@@ -650,7 +654,12 @@ async function validatePreferredScout(db: ReturnType<typeof getDb>, customerId: 
   if (!scoutId) return null;
   if (!UUID_PATTERN.test(scoutId)) throw new Error("The preferred Scout selection is invalid.");
   const [[profile], [saved], [completed]] = await Promise.all([
-    db.select().from(scoutProfiles).where(and(eq(scoutProfiles.userId, scoutId), eq(scoutProfiles.status, "approved"))).limit(1),
+    db.select().from(scoutProfiles).where(and(
+      eq(scoutProfiles.userId, scoutId),
+      eq(scoutProfiles.status, "approved"),
+      eq(scoutProfiles.handbookVersion, SCOUT_HANDBOOK_VERSION),
+      isNotNull(scoutProfiles.handbookAcceptedAt),
+    )).limit(1),
     db.select({ id: customerPreferredScouts.id }).from(customerPreferredScouts).where(and(eq(customerPreferredScouts.customerId, customerId), eq(customerPreferredScouts.scoutId, scoutId))).limit(1),
     db.select({ id: missions.id }).from(missions).where(and(eq(missions.customerId, customerId), eq(missions.scoutId, scoutId), eq(missions.status, "completed"))).limit(1),
   ]);
@@ -677,27 +686,25 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
     required(input.homeZip, "Home ZIP code");
     required(input.vehicleType, "Vehicle access");
     if (!input.consent) throw new Error("You must agree to verification before joining.");
+    if (!input.handbookAccepted) throw new Error("You must review and acknowledge the Scout Handbook before joining.");
     if (!input.canSee && !input.canMove && !input.canMeet) throw new Error("Select at least one mission type.");
     if (!/^\d{5}(?:-\d{4})?$/.test(input.homeZip.trim())) throw new Error("Enter a valid ZIP code.");
 
     const user = await requireAppUser("scout");
+    const requestHeaders = await headers();
     const db = getDb();
-    await db
-      .update(users)
-      .set({
+    const now = new Date();
+    const [, profileRows] = await db.batch([
+      db.update(users).set({
         role: "scout",
         firstName: input.firstName.trim(),
         lastName: input.lastName.trim(),
         phone: input.phone.trim(),
         smsNotificationsEnabled: input.smsNotificationsEnabled,
-        smsConsentedAt: input.smsNotificationsEnabled ? user.smsConsentedAt ?? new Date() : user.smsConsentedAt,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
-
-    const [profile] = await db
-      .insert(scoutProfiles)
-      .values({
+        smsConsentedAt: input.smsNotificationsEnabled ? user.smsConsentedAt ?? now : user.smsConsentedAt,
+        updatedAt: now,
+      }).where(eq(users.id, user.id)),
+      db.insert(scoutProfiles).values({
         userId: user.id,
         homeZip: input.homeZip.trim(),
         serviceRadiusMiles: input.radius,
@@ -706,7 +713,9 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
         canSee: input.canSee,
         canMove: input.canMove,
         canMeet: input.canMeet,
-        verificationConsentedAt: new Date(),
+        verificationConsentedAt: now,
+        handbookVersion: SCOUT_HANDBOOK_VERSION,
+        handbookAcceptedAt: now,
       })
       .onConflictDoUpdate({
         target: scoutProfiles.userId,
@@ -718,11 +727,23 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
           canSee: input.canSee,
           canMove: input.canMove,
           canMeet: input.canMeet,
-          verificationConsentedAt: new Date(),
-          updatedAt: new Date(),
+          verificationConsentedAt: now,
+          handbookVersion: SCOUT_HANDBOOK_VERSION,
+          handbookAcceptedAt: now,
+          updatedAt: now,
         },
       })
-      .returning({ id: scoutProfiles.id });
+      .returning({ id: scoutProfiles.id }),
+      db.insert(scoutHandbookAcceptances).values({
+        userId: user.id,
+        handbookVersion: SCOUT_HANDBOOK_VERSION,
+        source: "onboarding",
+        userAgent: requestHeaders.get("user-agent")?.slice(0, 500) ?? null,
+        acceptedAt: now,
+      }).onConflictDoNothing(),
+    ]);
+    const [profile] = profileRows;
+    if (!profile) throw new Error("We could not save your Scout profile.");
 
     return { ok: true, id: profile.id, scoutUserId: user.id };
   } catch (error) {

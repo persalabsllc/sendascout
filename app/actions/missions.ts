@@ -33,6 +33,7 @@ import { geographicDistanceMeters, verifyScoutAtLocation } from "@/lib/mission-v
 import { formatDateTime } from "@/lib/time";
 import { scoutApprovalChecklist } from "@/lib/scout-approval";
 import { LEGAL_VERSION } from "@/lib/legal";
+import { SCOUT_HANDBOOK_VERSION, hasCurrentScoutHandbookAcceptance } from "@/lib/scout-handbook";
 import { scoutConnectReady } from "@/lib/stripe-connect";
 import { getStripeLivemode } from "@/lib/stripe";
 import { cancelUncollectedBookingCheckout } from "@/lib/stripe-payments";
@@ -174,6 +175,9 @@ export async function claimMission(id: string): Promise<Result> {
     if (!profile || profile.status !== "approved" || profile.identityCheck !== "clear" || !profile.identityVerifiedName?.trim() || !profile.identityVerifiedAt) {
       throw new Error("Your Scout account and verified identity must be approved before claiming missions.");
     }
+    if (!hasCurrentScoutHandbookAcceptance(profile)) {
+      throw new Error("Review and acknowledge the current Scout Handbook before claiming missions.");
+    }
     const stripeLivemode = getStripeLivemode();
     if (!scoutConnectReady(profile, stripeLivemode)) throw new Error("Finish Stripe payout setup before claiming missions.");
     const mission = await getMission(id);
@@ -212,6 +216,8 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.identity_verified_name IS NOT NULL
             AND approved_profile.identity_verified_at IS NOT NULL
             AND approved_profile.headshot_path IS NOT NULL
+            AND approved_profile.handbook_version = ${SCOUT_HANDBOOK_VERSION}
+            AND approved_profile.handbook_accepted_at IS NOT NULL
             AND approved_profile.home_zip IS NOT DISTINCT FROM ${profile.homeZip}
             AND approved_profile.service_radius_miles = ${profile.serviceRadiusMiles}
             AND approved_profile.vehicle_type IS NOT DISTINCT FROM ${profile.vehicleType}
@@ -309,6 +315,8 @@ export async function claimMission(id: string): Promise<Result> {
             AND approved_profile.identity_verified_name IS NOT NULL
             AND approved_profile.identity_verified_at IS NOT NULL
             AND approved_profile.headshot_path IS NOT NULL
+            AND approved_profile.handbook_version = ${SCOUT_HANDBOOK_VERSION}
+            AND approved_profile.handbook_accepted_at IS NOT NULL
             AND approved_profile.home_zip IS NOT DISTINCT FROM ${profile.homeZip}
             AND approved_profile.service_radius_miles = ${profile.serviceRadiusMiles}
             AND approved_profile.vehicle_type IS NOT DISTINCT FROM ${profile.vehicleType}
@@ -1455,6 +1463,8 @@ export async function adminSetScoutStatus(profileId: string, status: "review" | 
       canMove: scoutProfiles.canMove,
       canMeet: scoutProfiles.canMeet,
       verificationConsentedAt: scoutProfiles.verificationConsentedAt,
+      handbookVersion: scoutProfiles.handbookVersion,
+      handbookAcceptedAt: scoutProfiles.handbookAcceptedAt,
       stripeAccountId: scoutProfiles.stripeAccountId,
       stripeAccountLivemode: scoutProfiles.stripeAccountLivemode,
       stripeConnectStatus: scoutProfiles.stripeConnectStatus,
