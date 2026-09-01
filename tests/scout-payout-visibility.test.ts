@@ -38,6 +38,13 @@ test("Mission Board makes an incomplete payout account an explicit clickable blo
   assert.match(payoutBanner, /Set up payouts/);
 });
 
+test("Scout mission amounts emphasize earnings without comparing customer pricing", () => {
+  assert.doesNotMatch(missionBoardPage, /not the customer price/i);
+  assert.ok(missionBoardPage.includes("Each amount shown is what you&apos;ll earn for completing that mission."));
+  assert.ok(missionBoardPage.includes("You&apos;ll earn"));
+  assert.ok(dashboard.includes("You&apos;ll earn"));
+});
+
 test("Payout banner explains that normal approval and matching rules still apply", () => {
   assert.match(payoutBanner, /applicationApproved/);
   assert.match(payoutBanner, /Matching missions appear after your application is approved/);

@@ -135,7 +135,7 @@ function ScoutOverview({ missions, profileStatus, showScoutBanner, scoutPayoutRe
       <div className="dash-section-title"><div><h2>Mission board</h2><p>Opportunities within your selected service area.</p></div></div>
       {missionBoard.length ? <div className="mission-list scout-list">{missionBoard.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>Scout payout</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.assigned ? `Your ${labelFor(mission.type)} mission` : labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="payout"><small>You&apos;ll earn</small><strong>{money(mission.payoutCents ?? 0)}</strong></div><span className="claim-button">{mission.assigned ? statusLabel(mission.status) : "Review"}</span></Link>;
       })}</div> : <EmptyMissions />}
     </section>
   </>;
