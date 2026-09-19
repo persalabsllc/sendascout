@@ -134,6 +134,13 @@
       "when": 1788269108290,
       "tag": "0018_notification_dedupe",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789790400000,
+      "tag": "0019_see_it_products",
+      "breakpoints": true
     }
   ]
 }
