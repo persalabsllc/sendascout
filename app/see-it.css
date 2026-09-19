@@ -232,7 +232,6 @@
   .see-how { padding-block: 36px; }
   .see-how-heading { display: block; }
   .see-how-heading > p { margin-top: 18px; max-width: none; font-size: 14px; }
-  .see-how-heading > p br { display: none; }
   .see-steps { margin-top: 26px; }
   .see-steps h3 { font-size: 18px; }
   .see-steps p { font-size: 14px; }
@@ -247,7 +246,6 @@
   .see-scout-band .see-kicker { font-size: 9px; }
   .see-scout-band p { font-size: 14px; }
   .see-faq { grid-template-columns: 1fr; gap: 5px; }
-  .see-faq h2 br { display: none; }
   .see-faq summary { font-size: 15px; }
   .see-faq details p { font-size: 14px; }
   .see-other { align-items: start; flex-direction: column; gap: 16px; font-size: 12px; }
