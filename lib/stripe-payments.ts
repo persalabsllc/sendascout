@@ -28,6 +28,7 @@ import {
 import { syncRefundedPayment } from "@/lib/stripe-refunds";
 import { settleMissionBestEffort } from "@/lib/stripe-settlement";
 import { getAppUrl, getStripe, getStripeLivemode, stripeObjectId } from "@/lib/stripe";
+import { schedulePlatformActivityAlerts } from "@/lib/platform-activity-alerts";
 
 type AppUser = typeof users.$inferSelect;
 type PaymentRecord = typeof payments.$inferSelect;
@@ -736,6 +737,7 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
     }
   }
   const published = Number(summary?.published_count ?? 0) === 1;
+  if (published) schedulePlatformActivityAlerts();
   if (published) await alertEligibleScouts(row.mission.id);
   if (Number(summary?.late_refund_count ?? 0) === 1) {
     await refundLatePaymentBestEffort(row.payment.id, "payment_success");

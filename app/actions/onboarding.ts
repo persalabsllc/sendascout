@@ -32,6 +32,7 @@ import { localDateTimeToUtc } from "@/lib/time";
 import { isMissionTimeZone, normalizeMissionTimeZone } from "@/lib/us-time-zones";
 import { createHostedCheckoutForPayment, ensureStripeCustomer } from "@/lib/stripe-payments";
 import { getStripeLivemode } from "@/lib/stripe";
+import { schedulePlatformActivityAlerts } from "@/lib/platform-activity-alerts";
 
 export type MissionChecklistDraft = {
   prompt: string;
@@ -774,6 +775,7 @@ export async function createScoutApplication(input: ScoutInput): Promise<Onboard
     ]);
     const [profile] = profileRows;
     if (!profile) throw new Error("We could not save your Scout profile.");
+    schedulePlatformActivityAlerts();
     await tryAutoApproveScout(user.id);
 
     return { ok: true, id: profile.id, scoutUserId: user.id };

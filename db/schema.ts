@@ -934,3 +934,24 @@ export const seeOfferEvents = pgTable("see_offer_events", {
   version: integer("version").notNull(), previousCents: integer("previous_cents").notNull(), offeredCents: integer("offered_cents").notNull(), reason: text("reason").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, table => [uniqueIndex("see_offer_events_mission_id_version_key").on(table.missionId, table.version)]);
+
+export const platformActivityAlerts = pgTable("platform_activity_alerts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventKey: text("event_key").notNull().unique(),
+  kind: text("kind").notNull(),
+  payload: jsonb("payload").notNull(),
+  status: text("status").notNull().default("pending"),
+  requestPayload: jsonb("request_payload"),
+  providerMessageId: text("provider_message_id"),
+  leaseToken: uuid("lease_token"),
+  firstAttemptAt: timestamp("first_attempt_at", { withTimezone: true }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  error: text("error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, table => [
+  index("platform_activity_alerts_pending_idx").on(table.status, table.nextAttemptAt),
+  check("platform_activity_alerts_kind_check", sql`${table.kind} IN ('mission_launched','scout_signup','customer_created','alerts_enabled')`),
+  check("platform_activity_alerts_status_check", sql`${table.status} IN ('pending','processing','accepted','failed','ignored')`),
+]);

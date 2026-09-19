@@ -5,6 +5,7 @@ import { getDb } from "@/db";
 import { users } from "@/db/schema";
 import { safeLocalReturn } from "@/lib/see-it";
 import { hasCurrentLegalAcceptance } from "@/lib/legal";
+import { schedulePlatformActivityAlerts } from "@/lib/platform-activity-alerts";
 
 export type AppRole = "customer" | "scout" | "admin";
 
@@ -47,6 +48,7 @@ export async function requireAuthenticatedAppUser(preferredRole: AppRole = "cust
     })
     .returning();
 
+  schedulePlatformActivityAlerts();
   return created;
 }
 
