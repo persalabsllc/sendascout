@@ -955,3 +955,28 @@ export const platformActivityAlerts = pgTable("platform_activity_alerts", {
   check("platform_activity_alerts_kind_check", sql`${table.kind} IN ('mission_launched','scout_signup','customer_created','alerts_enabled')`),
   check("platform_activity_alerts_status_check", sql`${table.status} IN ('pending','processing','accepted','failed','ignored')`),
 ]);
+
+export const outreachSettings = pgTable("outreach_settings", {
+  id: integer("id").primaryKey().default(1), paused: boolean("paused").notNull().default(true), dailyLimit: integer("daily_limit").notNull().default(10),
+  postalAddress: text("postal_address").notNull().default(""), mailbox: text("mailbox"), refreshTokenEncrypted: text("refresh_token_encrypted"),
+  connectedAt: timestamp("connected_at",{withTimezone:true}), lastSyncAt: timestamp("last_sync_at",{withTimezone:true}), lastError: text("last_error"),
+  leaseToken: uuid("lease_token"), leaseUntil: timestamp("lease_until",{withTimezone:true}), updatedAt: timestamp("updated_at",{withTimezone:true}).notNull().defaultNow(),
+},table=>[check("outreach_settings_id_check",sql`${table.id}=1`),check("outreach_settings_daily_limit_check",sql`${table.dailyLimit} BETWEEN 1 AND 40`)]);
+export const outreachProspects = pgTable("outreach_prospects", {
+  id: uuid("id").defaultRandom().primaryKey(), company: text("company").notNull(), contactName: text("contact_name").notNull().default(""),email: text("email").notNull().unique(),
+  website: text("website").notNull().default(""),segment: text("segment").notNull(),location: text("location").notNull().default(""),researchNote: text("research_note").notNull().default(""),sourceUrl: text("source_url").notNull().default(""),notes: text("notes").notNull().default(""),
+  stage: text("stage").notNull().default("new"),permission: text("permission").notNull().default("research_only"),permissionNote: text("permission_note").notNull().default(""),permissionRecordedAt: timestamp("permission_recorded_at",{withTimezone:true}),
+  suppressedAt: timestamp("suppressed_at",{withTimezone:true}),suppressionReason:text("suppression_reason"),unsubscribeToken:text("unsubscribe_token").notNull().unique().default(sql`replace(gen_random_uuid()::text || gen_random_uuid()::text,'-','')`),
+  linkedCustomerId:uuid("linked_customer_id").references(()=>users.id),createdBy:uuid("created_by").notNull().references(()=>users.id),updatedBy:uuid("updated_by").notNull().references(()=>users.id),
+  createdAt:timestamp("created_at",{withTimezone:true}).notNull().defaultNow(),updatedAt:timestamp("updated_at",{withTimezone:true}).notNull().defaultNow(),
+},table=>[index("outreach_prospects_stage_idx").on(table.stage,table.createdAt),check("outreach_prospects_email_check",sql`${table.email}=lower(trim(${table.email}))`),check("outreach_prospects_segment_check",sql`${table.segment} IN ('property','vehicle','project','purchase','custom')`),check("outreach_prospects_stage_check",sql`${table.stage} IN ('new','contacted','replied','interested','customer','closed','unsubscribed')`),check("outreach_prospects_permission_check",sql`${table.permission} IN ('research_only','requested','opt_in')`)]);
+export const outreachMessages = pgTable("outreach_messages", {
+  id:uuid("id").defaultRandom().primaryKey(),prospectId:uuid("prospect_id").notNull().references(()=>outreachProspects.id),subject:text("subject").notNull(),body:text("body").notNull(),status:text("status").notNull().default("draft"),
+  followupOf:uuid("followup_of").references(():AnyPgColumn=>outreachMessages.id),approvedBy:uuid("approved_by").references(()=>users.id),approvedAt:timestamp("approved_at",{withTimezone:true}),scheduledAt:timestamp("scheduled_at",{withTimezone:true}),
+  attemptedAt:timestamp("attempted_at",{withTimezone:true}),acceptedAt:timestamp("accepted_at",{withTimezone:true}),replyAt:timestamp("reply_at",{withTimezone:true}),lastCheckedAt:timestamp("last_checked_at",{withTimezone:true}),
+  googleMessageId:text("google_message_id").unique(),googleThreadId:text("google_thread_id"),wireMessageId:text("wire_message_id").notNull().unique(),rawPayload:text("raw_payload"),senderMailbox:text("sender_mailbox"),error:text("error"),
+  createdAt:timestamp("created_at",{withTimezone:true}).notNull().defaultNow(),updatedAt:timestamp("updated_at",{withTimezone:true}).notNull().defaultNow(),
+},table=>[index("outreach_messages_queue_idx").on(table.status,table.scheduledAt),uniqueIndex("outreach_one_followup_idx").on(table.followupOf).where(sql`${table.followupOf} IS NOT NULL`),uniqueIndex("outreach_one_active_send_idx").on(table.prospectId).where(sql`${table.status} IN ('queued','sending','unknown')`),check("outreach_messages_status_check",sql`${table.status} IN ('draft','queued','sending','accepted','replied','failed','unknown','cancelled')`)]);
+export const outreachOauthStates = pgTable("outreach_oauth_states", {
+  stateHash:text("state_hash").primaryKey(),adminId:uuid("admin_id").notNull().references(()=>users.id),verifier:text("verifier").notNull(),expiresAt:timestamp("expires_at",{withTimezone:true}).notNull(),
+});

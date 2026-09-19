@@ -18,10 +18,11 @@ async function mission(id: string, paid = false) {
 }
 before(async () => {
   const migrations = readMigrationFiles({ migrationsFolder: "./db/migrations" });
-  for (const migration of migrations.slice(0,-1)) for (const statement of migration.sql) await db.exec(statement);
+  const activationIndex=JSON.parse(readFileSync("db/migrations/meta/_journal.json","utf8")).entries.findIndex((entry:{tag:string})=>entry.tag==="0020_platform_activity_alerts");
+  for (const migration of migrations.slice(0,activationIndex)) for (const statement of migration.sql) await db.exec(statement);
   await db.query("INSERT INTO users(id,clerk_user_id,email,role) VALUES($1,'old-customer','old@example.test','customer')", [customer]);
   await mission(historical,true);
-  for (const statement of migrations.at(-1)!.sql) await db.exec(statement);
+  for (const migration of migrations.slice(activationIndex)) for (const statement of migration.sql) await db.exec(statement);
 });
 after(() => db.close());
 async function events(key: string) { return (await db.query<{id:string;status:string;payload:Record<string,string|number>}>("SELECT * FROM platform_activity_alerts WHERE event_key=$1",[key])).rows; }

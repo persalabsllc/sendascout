@@ -148,6 +148,13 @@
       "when": 1789840800000,
       "tag": "0020_platform_activity_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789844400000,
+      "tag": "0021_outreach_crm",
+      "breakpoints": true
     }
   ]
 }
