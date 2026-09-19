@@ -5,15 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { IconAlertTriangle, IconArrowRight, IconBook2, IconBriefcase, IconCheck, IconLifebuoy, IconMail, IconRefresh, IconRoute, IconUserPlus, IconUsers } from "@tabler/icons-react";
 import { adminSetMissionStatus } from "@/app/actions/missions";
+import { adminReconcileBookingPayment } from "@/app/actions/payment-reconciliation";
+import { bookingBlockedReason, bookingMissionStatus, paymentStatusLabel } from "@/lib/payment-presentation";
 import { adminArchiveMission, adminResolveMissionCase, adminRetryNotification, adminSetOperationalEventStatus } from "@/app/actions/operations";
 import { Brand } from "./brand";
 
-type MissionRow = { id: string; title: string; type: string; status: string; paymentStatus: string; customer: string; location: string; price: number; payout: number; routeMiles: number | null; routeVerified: boolean; authorizedMinutes: number; createdAt: string };
+type MissionRow = { id: string; title: string; type: string; status: string; paymentStatus: string; paymentId: string | null; paymentIntentId: string | null; paymentFailureCode: string | null; paymentUpdatedAt: string | null; paidAt: string | null; confirmationFailed: boolean; canCheckPayment: boolean; customer: string; location: string; price: number; payout: number; routeMiles: number | null; routeVerified: boolean; authorizedMinutes: number; createdAt: string };
 type CaseRow = { id: string; missionId: string; missionTitle: string; kind: string; status: string; previousMissionStatus: string; summary: string; reporter: string; adminNotes: string | null; resolution: string | null; refundAmountCents: number; payoutAmountCents: number; financialApprovalPending: boolean; proposedByCurrentAdmin: boolean; createdAt: string; resolvedAt: string | null; customerPriceCents: number; scoutPayoutCents: number };
 type MessageRow = { id: string; channel: string; recipient: string; title: string; status: string; error: string | null; attempts: number; providerAccepted: boolean; lastAttemptAt: string | null; createdAt: string; sentAt: string | null };
 type OperationalEventRow = { id: string; severity: string; category: string; message: string; status: string; occurrenceCount: number; lastSeenAt: string; alertedAt: string | null };
 
-export function ControlRoom({ stats, missions, cases, messageNotifications, operationalEvents, sentMode }: { stats: { newCustomers: number; newScouts: number; open: number; active: number; cases: number; failedMessages: number }; missions: MissionRow[]; cases: CaseRow[]; messageNotifications: MessageRow[]; operationalEvents: OperationalEventRow[]; sentMode: "Disabled" | "Sandbox" | "Live" }) {
+export function ControlRoom({ stats, missions, cases, messageNotifications, operationalEvents, sentMode }: { stats: { newCustomers: number; newScouts: number; newMissions: number; paymentExceptions: number; open: number; active: number; cases: number; failedMessages: number }; missions: MissionRow[]; cases: CaseRow[]; messageNotifications: MessageRow[]; operationalEvents: OperationalEventRow[]; sentMode: "Disabled" | "Sandbox" | "Live" }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
@@ -33,20 +35,28 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
       <div className="control-stats">
         <ControlStat alert={stats.newCustomers > 0} href="/control-room/customers" icon={IconUserPlus} label="New customers · 24h" value={stats.newCustomers} />
         <ControlStat alert={stats.newScouts > 0} href="/control-room/scouts" icon={IconUsers} label="New Scouts · 24h" value={stats.newScouts} />
+        <ControlStat alert={stats.newMissions > 0} href="#mission-queue" icon={IconBriefcase} label="New missions · 24h" value={stats.newMissions} />
+        <ControlStat alert={stats.paymentExceptions > 0} href="#mission-queue" icon={IconAlertTriangle} label="Payment confirmation issues" value={stats.paymentExceptions} />
         <ControlStat icon={IconBriefcase} label="Open missions" value={stats.open} />
         <ControlStat icon={IconRoute} label="Active missions" value={stats.active} />
         <ControlStat icon={IconAlertTriangle} label="Open cases" value={stats.cases} />
         <ControlStat icon={IconMail} label="Failed messages" value={stats.failedMessages} />
       </div>
 
-      <section className="control-section">
-        <div className="control-section-title"><div><h2>Mission queue</h2><p>New missions publish automatically. Pull an unclaimed mission when it needs review or correction.</p></div></div>
+      {stats.paymentExceptions > 0 && <p className="form-error" role="alert">{stats.paymentExceptions} booking payment confirmation{stats.paymentExceptions === 1 ? " needs" : "s need"} attention. Check Stripe in the mission queue before requesting another payment.</p>}
+      <section className="control-section" id="mission-queue">
+        <div className="control-section-title"><div><h2>Mission queue</h2><p>New missions publish after payment confirmation. Check an existing Stripe payment without charging the customer again.</p></div></div>
         {missions.length ? <div className="control-table mission-admin-list">{missions.map((mission) => <article key={mission.id}>
-          <div className="control-primary"><small>{titleCase(mission.type)} It · {mission.customer}</small><strong>{mission.title}</strong><span>{mission.location} · Customer {money(mission.price)} · Scout {money(mission.payout)}</span><small>{mission.type === "move" ? mission.routeVerified && mission.routeMiles ? `${mission.routeMiles} road miles · Google-verified route` : "Route verification required before release" : mission.type === "meet" ? `${mission.authorizedMinutes / 60}-hour customer authorization` : "Fixed-price mission"}</small></div>
-          <span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{mission.status === "draft" ? "Pulled" : titleCase(mission.status)}</span>
+          <div className="control-primary"><small>{titleCase(mission.type)} It · {mission.customer} · Created {new Date(mission.createdAt).toLocaleString()}</small><strong>{mission.title}</strong><span>{mission.location} · Customer {money(mission.price)} · Scout {money(mission.payout)}</span><small>{mission.type === "move" ? mission.routeVerified && mission.routeMiles ? `${mission.routeMiles} road miles · Google-verified route` : "Route verification required before release" : mission.type === "meet" ? `${mission.authorizedMinutes / 60}-hour customer authorization` : "Fixed-price mission"}</small>
+            <span><b>Payment: {mission.confirmationFailed ? "Confirmation delayed" : paymentStatusLabel(mission.paymentStatus)}</b>{mission.paidAt && ` · Received ${new Date(mission.paidAt).toLocaleString()}`}</span>
+            {bookingBlockedReason(mission.status, mission.paymentStatus, mission.confirmationFailed) && <span>{bookingBlockedReason(mission.status, mission.paymentStatus, mission.confirmationFailed)}</span>}
+            {mission.paymentId && <details><summary>Payment details</summary><small>Ledger: {mission.paymentId}</small>{mission.paymentIntentId && <small>Stripe: {mission.paymentIntentId}</small>}{mission.paymentFailureCode && <small>Reason: {mission.paymentFailureCode}</small>}{mission.paymentUpdatedAt && <small>Last update: {new Date(mission.paymentUpdatedAt).toLocaleString()}</small>}</details>}
+          </div>
+          <span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{bookingMissionStatus(mission.status, mission.paymentStatus, mission.confirmationFailed)}</span>
           <div className="control-actions">
             <Link href={`/dashboard/missions/${mission.id}`}>Open <IconArrowRight size={16} /></Link>
-            {mission.status === "draft" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "open"))}>Reopen to Scouts</button>}
+            {mission.canCheckPayment && mission.paymentId && <button disabled={pending} onClick={() => run(() => adminReconcileBookingPayment(mission.paymentId!))}>{pending ? "Checking…" : "Check Stripe"}</button>}
+            {mission.status === "draft" && mission.paymentStatus === "paid" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "open"))}>Reopen to Scouts</button>}
             {mission.status === "open" && <button disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "draft"))}>Pull from Scouts</button>}
             {!['completed', 'cancelled', 'disputed'].includes(mission.status) && !['authorized', 'paid', 'partially_refunded', 'refunded', 'disputed'].includes(mission.paymentStatus) && <button className="danger-link" disabled={pending} onClick={() => run(() => adminSetMissionStatus(mission.id, "cancelled"))}>Cancel</button>}
             {['completed', 'cancelled', 'draft'].includes(mission.status) && <button disabled={pending} onClick={() => run(() => adminArchiveMission(mission.id))}>Archive</button>}

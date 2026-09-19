@@ -143,6 +143,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       see: seeContract ? {templateName:seeContract.template.name,templateKey:seeContract.template.key,maxPhotos:seeContract.template.maxPhotos,maxVideos:seeContract.template.maxVideos,deadline:mission.seeDeadlineAt?.toISOString()??null,cutoff:mission.seeAssignmentCutoffAt?.toISOString()??null,earliest:mission.seeEarliestVisitAt?.toISOString()??null,reportStatus:mission.seeReportStatus,revision:mission.seeReportRevision,releasedAt:mission.seeReportReleasedAt?.toISOString()??null,reviewNote:latestReport?.reviewNote??null,tasks:seeContract.template.tasks,report:latestReport && (role!=="customer" || mission.seeReportStatus==="ready") ? latestReport.snapshot : null} : null,
       type: mission.type,
       status: mission.status,
+      paymentStatus: bundle?.paymentStatus ?? mission.paymentStatus,
       title: !showFullAddress && seeContract ? seeContract.template.name : mission.title,
       instructions: showFullAddress ? mission.instructions : "Full instructions become available after you claim the mission.",
       pickup,

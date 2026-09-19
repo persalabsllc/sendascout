@@ -483,6 +483,7 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
         CASE
           WHEN candidate.kind = 'booking' THEN
             root.status = 'draft'
+            AND candidate.paid_at IS NULL
             AND root.archived_at IS NULL
             AND (
               candidate.bundle_id IS NULL
@@ -620,12 +621,12 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
             ELSE NULL
           END,
           preferred_scout_exclusive_until = CASE
-            WHEN EXISTS (SELECT 1 FROM preferred_scout_readiness) THEN ${preferredUntil}
+            WHEN EXISTS (SELECT 1 FROM preferred_scout_readiness) THEN ${preferredUntil}::timestamptz
             ELSE NULL
           END,
           preferred_scout_broadcast_at = CASE
             WHEN root.preferred_scout_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM preferred_scout_readiness)
-              THEN ${now}
+              THEN ${now}::timestamptz
             ELSE NULL
           END,
           updated_at = ${now}
@@ -1038,7 +1039,7 @@ export async function recordPaymentIntentState(intent: Stripe.PaymentIntent) {
     ? await db.select().from(payments).where(eq(payments.id, paymentId)).limit(1)
     : await db.select().from(payments).where(eq(payments.stripePaymentIntentId, intent.id)).limit(1);
   if (!payment || ["paid", "partially_refunded", "refunded", "disputed"].includes(payment.status)) return null;
-  const status = paymentIntentLedgerStatus(intent.status);
+  const status = paymentIntentLedgerStatus(intent.status, Boolean(intent.last_payment_error));
   const now = new Date();
   const failure = intent.last_payment_error;
   const [updated] = await db.update(payments).set({
@@ -1552,13 +1553,16 @@ export async function recordDispute(dispute: Stripe.Dispute, providerEventCreate
 async function setBookingPaymentStatus(payment: PaymentRecord, status: PaymentRecord["status"]) {
   const db = getDb();
   const aggregateStatus = status === "canceled" ? "cancelled" : status;
+  // A success callback can commit between the ledger update and this projection.
+  // Never let an older pending/failed projection overwrite the paid mission.
+  const stillCurrent = sql`EXISTS (SELECT 1 FROM payments AS current_payment WHERE current_payment.id = ${payment.id} AND current_payment.status = ${status})`;
   if (payment.bundleId) {
     await db.batch([
-      db.update(missions).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(and(eq(missions.bundleId, payment.bundleId), isNull(missions.archivedAt))),
-      db.update(missionBundles).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(eq(missionBundles.id, payment.bundleId)),
+      db.update(missions).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(and(eq(missions.bundleId, payment.bundleId), isNull(missions.archivedAt), stillCurrent)),
+      db.update(missionBundles).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(and(eq(missionBundles.id, payment.bundleId), stillCurrent)),
     ]);
   } else {
-    await db.update(missions).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(eq(missions.id, payment.missionId));
+    await db.update(missions).set({ paymentStatus: aggregateStatus, updatedAt: new Date() }).where(and(eq(missions.id, payment.missionId), stillCurrent));
   }
 }
 
@@ -1592,11 +1596,11 @@ function validateCheckoutSession(session: Stripe.Checkout.Session, payment: Paym
   }
 }
 
-function paymentIntentLedgerStatus(status: Stripe.PaymentIntent.Status): PaymentRecord["status"] {
+function paymentIntentLedgerStatus(status: Stripe.PaymentIntent.Status, hasPaymentError = false): PaymentRecord["status"] {
   if (status === "requires_action" || status === "requires_confirmation") return "requires_action";
   if (status === "processing") return "processing";
   if (status === "canceled") return "canceled";
-  if (status === "requires_payment_method") return "failed";
+  if (status === "requires_payment_method") return hasPaymentError ? "failed" : "pending";
   if (status === "requires_capture") return "authorized";
   return "pending";
 }

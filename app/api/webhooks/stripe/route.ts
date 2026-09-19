@@ -1,5 +1,7 @@
 import { getStripe, getStripeLivemode } from "@/lib/stripe";
 import { processPlatformStripeEvent } from "@/lib/stripe-webhooks";
+import { reportOperationalEvent } from "@/lib/observability";
+import { paymentErrorDiagnostic } from "@/lib/payment-presentation";
 
 export const runtime = "nodejs";
 
@@ -27,10 +29,12 @@ export async function POST(request: Request) {
     const status = await processPlatformStripeEvent(event);
     return Response.json({ received: true, status });
   } catch (error) {
-    console.error("Stripe platform webhook processing failed", {
-      eventId: event.id,
-      eventType: event.type,
-      error: error instanceof Error ? error.message : "Unknown error",
+    const diagnostic = paymentErrorDiagnostic(error);
+    await reportOperationalEvent({
+      category: "stripe_webhook_confirmation",
+      message: `Stripe ${event.type} could not be applied. ${diagnostic.message}`,
+      fingerprint: `stripe-webhook:${event.id}`,
+      context: { eventId: event.id, eventType: event.type, code: diagnostic.code },
     });
     return Response.json({ error: "Webhook processing failed." }, { status: 500 });
   }

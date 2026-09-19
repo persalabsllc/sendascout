@@ -1,8 +1,9 @@
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { ControlRoom } from "@/components/control-room";
 import { getDb } from "@/db";
-import { missionBundles, missionCases, missions, notifications, operationalEvents, scoutProfiles, users } from "@/db/schema";
+import { missionBundles, missionCases, missions, notifications, operationalEvents, payments, scoutProfiles, users } from "@/db/schema";
 import { requireAdminUser } from "@/lib/app-user";
+import { bookingConfirmationFailed } from "@/lib/booking-payment-queries";
 
 export const metadata = { title: "Control Room | Send a Scout", robots: { index: false, follow: false } };
 
@@ -10,9 +11,10 @@ export default async function ControlRoomPage() {
   const admin = await requireAdminUser();
   const db = getDb();
   const [missionRows, caseRows, messageRows, eventRows, [newCustomerCount], [newScoutCount]] = await Promise.all([
-    db.select({ mission: missions, customer: users, bundle: missionBundles }).from(missions)
+    db.select({ mission: missions, customer: users, bundle: missionBundles, payment: payments, confirmationFailed: bookingConfirmationFailed, isNewMission: sql<boolean>`${missions.createdAt} > now() - interval '24 hours'` }).from(missions)
       .innerJoin(users, eq(users.id, missions.customerId))
       .leftJoin(missionBundles, eq(missionBundles.id, missions.bundleId))
+      .leftJoin(payments, and(eq(payments.kind, "booking"), or(eq(payments.missionId, missions.id), eq(payments.bundleId, missions.bundleId))))
       .where(isNull(missions.archivedAt)).orderBy(desc(missions.createdAt)),
     db.select({
       case: missionCases,
@@ -58,17 +60,26 @@ export default async function ControlRoomPage() {
     stats={{
       newCustomers: newCustomerCount?.count ?? 0,
       newScouts: newScoutCount?.count ?? 0,
+      newMissions: visibleMissionRows.filter(({ isNewMission }) => isNewMission).length,
+      paymentExceptions: visibleMissionRows.filter(({ confirmationFailed }) => confirmationFailed).length,
       open: visibleMissionRows.filter(({ mission, bundle }) => (bundle?.status ?? mission.status) === "open").length,
       active: visibleMissionRows.filter(({ mission, bundle }) => activeStatuses.includes((bundle?.status ?? mission.status) as typeof activeStatuses[number]) || bundle?.status === "in_progress").length,
       cases: caseRows.filter(({ case: item }) => item.status === "open").length,
       failedMessages: messageRows.filter(({ notification }) => notification.status === "failed").length,
     }}
-    missions={visibleMissionRows.map(({ mission, customer, bundle }) => ({
+    missions={visibleMissionRows.map(({ mission, customer, bundle, payment, confirmationFailed }) => ({
       id: mission.id,
       title: bundle?.title ?? mission.title,
       type: mission.type,
       status: bundle?.status ?? mission.status,
-      paymentStatus: bundle?.paymentStatus ?? mission.paymentStatus,
+      paymentStatus: payment?.status ?? bundle?.paymentStatus ?? mission.paymentStatus,
+      paymentId: payment?.id ?? null,
+      paymentIntentId: payment?.stripePaymentIntentId ?? null,
+      paymentFailureCode: payment?.failureCode ?? null,
+      paymentUpdatedAt: payment?.updatedAt.toISOString() ?? null,
+      paidAt: payment?.paidAt?.toISOString() ?? null,
+      confirmationFailed: Boolean(confirmationFailed),
+      canCheckPayment: Boolean(payment && ["pending", "requires_action", "processing", "authorized", "failed", "canceled"].includes(payment.status) && (payment.stripeCheckoutSessionId || payment.stripePaymentIntentId)),
       customer: [customer.firstName, customer.lastName].filter(Boolean).join(" ") || customer.email,
       location: `${mission.city}, ${mission.state} ${mission.zip}`,
       price: bundle?.customerPriceCents ?? mission.customerPriceCents,

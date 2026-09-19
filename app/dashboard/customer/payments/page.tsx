@@ -2,11 +2,13 @@ import Link from "next/link";
 import { desc, eq } from "drizzle-orm";
 import { IconArrowRight, IconCreditCard, IconReceipt, IconShieldCheck } from "@tabler/icons-react";
 import { ContinuePaymentButton } from "@/components/continue-payment-button";
+import { CheckPaymentButton } from "@/components/check-payment-button";
 import { CustomerDashboardShell } from "@/components/customer-dashboard-shell";
 import { getDb } from "@/db";
 import { missionBundles, missions, payments } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 import { customerPaymentEntryIsVisible } from "@/lib/customer-payment-ledger";
+import { bookingConfirmationFailed } from "@/lib/booking-payment-queries";
 
 export const metadata = { title: "Payments | Send a Scout", robots: { index: false, follow: false } };
 
@@ -15,12 +17,13 @@ const recoverableStatuses = new Set(["pending", "requires_action", "failed", "ca
 export default async function CustomerPaymentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkout?: string }>;
+  searchParams: Promise<{ checkout?: string; session_id?: string }>;
 }) {
   const user = await requireAppUser("customer");
-  const { checkout } = await searchParams;
+  const { checkout, session_id: sessionId } = await searchParams;
   const ledger = await getDb().select({
     payment: payments,
+    confirmationFailed: bookingConfirmationFailed,
     missionStatus: missions.status,
     missionTitle: missions.title,
     missionType: missions.type,
@@ -38,33 +41,39 @@ export default async function CustomerPaymentsPage({
   const attentionCents = visibleLedger.filter((row) => row.missionStatus !== "cancelled" && recoverableStatuses.has(row.payment.status))
     .reduce((sum, row) => sum + row.payment.amountCents, 0);
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || "Customer";
+  const returnedPayment = visibleLedger.find(({ payment }) => payment.stripeCheckoutSessionId === sessionId);
+  const returnConfirmed = returnedPayment && ["paid", "partially_refunded", "refunded", "disputed"].includes(returnedPayment.payment.status);
 
   return <CustomerDashboardShell active="payments" name={name}>
     <div className="dash-welcome simple-title"><div><span className="kicker">Customer billing</span><h1>Payments</h1><p>Every booking, supplement, additional task, and tip in one secure ledger.</p></div></div>
-    {checkout === "success" && <div className="notification-strip" role="status"><div><IconShieldCheck size={24} /><strong>Payment submitted</strong><p>Stripe is confirming the payment. Its status below will update as soon as confirmation finishes.</p></div></div>}
+    {checkout === "success" && <div className="notification-strip" role="status"><div><IconShieldCheck size={24} /><strong>{returnConfirmed ? "Payment received" : "Checking your payment"}</strong><p>{returnConfirmed ? "Your payment is recorded. See the ledger below for its current status." : "We’re checking the existing Stripe payment. Please don’t pay again if your card was already charged."}</p></div></div>}
     {checkout === "cancelled" && <div className="notification-strip" role="status"><div><IconCreditCard size={24} /><strong>Checkout canceled</strong><p>No new payment was completed. You can continue securely from the ledger below.</p></div></div>}
     <div className="stat-grid">
       <Stat icon={<IconReceipt size={22} />} label="Requested" value={money(requestedCents)} note={`${visibleLedger.length} payment entr${visibleLedger.length === 1 ? "y" : "ies"}`} />
       <Stat icon={<IconCreditCard size={22} />} label="Collected" value={money(collectedCents)} note="After completed refunds" />
       <Stat icon={<IconShieldCheck size={22} />} label="Needs attention" value={money(attentionCents)} note="Secure checkout powered by Stripe" />
     </div>
-    <section className="dash-section">
+    <section className="dash-section customer-payment-ledger">
       <div className="dash-section-title"><div><h2>Payment ledger</h2><p>Mission access is released only after its booking payment is confirmed.</p></div></div>
-      {visibleLedger.length ? <div className="mission-list">{visibleLedger.map(({ payment, missionStatus, missionTitle, missionType, bundleTitle }) => {
-        const canContinue = missionStatus !== "cancelled" && recoverableStatuses.has(payment.status);
+      {visibleLedger.length ? <div className="mission-list">{visibleLedger.map(({ payment, confirmationFailed, missionStatus, missionTitle, missionType, bundleTitle }) => {
+        const canContinue = missionStatus !== "cancelled" && recoverableStatuses.has(payment.status) && !confirmationFailed && !(checkout === "success" && payment.stripeCheckoutSessionId === sessionId);
+        const canCheck = payment.kind === "booking" && !["paid", "partially_refunded", "refunded", "disputed"].includes(payment.status) && Boolean(payment.stripeCheckoutSessionId || payment.stripePaymentIntentId);
         return <article className="mission-list-row" key={payment.id}>
           <span className="list-icon"><IconReceipt size={21} /></span>
           <div className="list-main">
             <small>{paymentKindLabel(payment.kind)}</small>
             <strong><Link href={`/dashboard/missions/${payment.missionId}`}>{bundleTitle ?? missionTitle}</Link></strong>
             <span>{missionTypeLabel(missionType)} · {payment.createdAt.toLocaleDateString()}</span>
-            <span>{paymentStatusNote(payment.status)}{payment.refundedAmountCents > 0 ? ` · ${money(payment.refundedAmountCents)} refunded` : ""}</span>
+            <span>{confirmationFailed ? "Payment confirmation is delayed. Check the existing payment; do not pay again." : paymentStatusNote(payment.status)}{payment.refundedAmountCents > 0 ? ` · ${money(payment.refundedAmountCents)} refunded` : ""}</span>
           </div>
           <div className="list-meta">
             <strong>{money(payment.amountCents)}</strong>
-            <span className={`status ${["failed", "canceled", "refunded"].includes(payment.status) ? "muted-status" : ""}`}>{paymentStatusLabel(payment.status)}</span>
+            <span className={`status ${["failed", "canceled", "refunded"].includes(payment.status) ? "muted-status" : ""}`}>{confirmationFailed ? "Confirmation delayed" : paymentStatusLabel(payment.status)}</span>
           </div>
-          {canContinue ? <ContinuePaymentButton paymentId={payment.id} /> : <Link className="list-arrow" href={`/dashboard/missions/${payment.missionId}`} aria-label={`View ${bundleTitle ?? missionTitle}`}><IconArrowRight size={18} /></Link>}
+          <div className="payment-ledger-actions">
+            {canCheck && <CheckPaymentButton paymentId={payment.id} autoCheck={checkout === "success" && payment.stripeCheckoutSessionId === sessionId} />}
+            {canContinue ? <ContinuePaymentButton paymentId={payment.id} /> : !canCheck && <Link className="list-arrow" href={`/dashboard/missions/${payment.missionId}`} aria-label={`View ${bundleTitle ?? missionTitle}`}><IconArrowRight size={18} /></Link>}
+          </div>
         </article>;
       })}</div> : <div className="dashboard-empty"><IconReceipt size={30} /><h3>No payments yet</h3><p>Your booking and additional mission payments will appear here.</p><Link className="button button-small" href="/request">Create a mission</Link></div>}
     </section>

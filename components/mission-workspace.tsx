@@ -20,6 +20,7 @@ import { openMissionCase } from "@/app/actions/operations";
 import type { MissionCaseKind } from "@/lib/mission-operations";
 import { meetActionOpensAt } from "@/lib/mission-timing";
 import { formatDateTime } from "@/lib/time";
+import { bookingMissionStatus, bookingBlockedReason } from "@/lib/payment-presentation";
 
 type Status = "draft" | "open" | "claimed" | "en_route" | "onsite" | "en_route_pickup" | "at_pickup" | "en_route_dropoff" | "at_dropoff" | "submitted" | "completed" | "cancelled" | "disputed";
 type MissionView = {
@@ -27,6 +28,7 @@ type MissionView = {
   id: string;
   type: "see" | "move" | "meet";
   status: Status;
+  paymentStatus: string;
   title: string;
   instructions: string;
   pickup: string;
@@ -243,10 +245,11 @@ export function MissionWorkspace({ role, mission, bundle, itinerary, messages, r
         <Link className="mission-back" href={role === "scout" ? "/dashboard/scout" : role === "admin" ? "/control-room" : "/dashboard/customer"}><IconArrowLeft size={18} /> Back to dashboard</Link>
         <header className="mission-hero">
           <div><span className="kicker">{missionLabel(mission.type)}</span><h1>{mission.title}</h1><p><IconMapPin size={17} /> {mission.pickup}</p></div>
-          <div className="mission-state"><small>Current status</small><strong>{mission.see && mission.status === "open" ? "Finding your Scout" : statusLabel(mission.type, mission.status)}</strong></div>
+          <div className="mission-state"><small>Current status</small><strong>{mission.status === "draft" ? bookingMissionStatus(mission.status, mission.paymentStatus) : mission.see && mission.status === "open" ? "Finding your Scout" : statusLabel(mission.type, mission.status)}</strong></div>
         </header>
 
         {error && <p className="form-error" role="alert">{error}</p>}
+        {mission.status === "draft" && role !== "scout" && <article className="mission-panel"><h2>{bookingMissionStatus(mission.status, mission.paymentStatus)}</h2><p>{bookingBlockedReason(mission.status, mission.paymentStatus)}</p><Link className="button button-small" href={role === "admin" ? "/control-room#mission-queue" : "/dashboard/customer/payments"}>{role === "admin" ? "Review payment in Control Room" : "Review payment status"}</Link></article>}
         <div className="mission-work-grid">
           <section className="mission-column">
             {mission.see && <SeeMissionPanel info={mission.see} missionId={mission.id} status={mission.status} timeZone={mission.timeZone} role={role} />}

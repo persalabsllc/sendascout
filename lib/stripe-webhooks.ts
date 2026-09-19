@@ -13,6 +13,7 @@ import {
   recordRefund,
 } from "@/lib/stripe-payments";
 import { getStripe, stripeObjectId } from "@/lib/stripe";
+import { paymentErrorDiagnostic } from "@/lib/payment-presentation";
 
 type WebhookScope = "platform" | "connected" | "v2";
 export type StripeWebhookEvent = Stripe.Event | Stripe.V2.Core.EventNotification;
@@ -48,7 +49,9 @@ export async function processPlatformStripeEvent(event: Stripe.Event) {
       case "payment_intent.payment_failed":
       case "payment_intent.canceled":
       case "payment_intent.succeeded":
-        await recordPaymentIntentState(event.data.object as Stripe.PaymentIntent);
+        // Delivery order is not guaranteed. Use current provider state so a late
+        // payment_intent.created event cannot masquerade as a failed charge.
+        await recordPaymentIntentState(await getStripe().paymentIntents.retrieve(event.data.object.id, { expand: ["latest_charge.balance_transaction"] }));
         return "processed";
       case "charge.refunded": {
         const incoming = event.data.object as Stripe.Charge;
@@ -145,7 +148,7 @@ export async function withStripeWebhookLedger(
     if (!completed) throw new Error(`Webhook event ${event.id} processing claim was superseded.`);
     return status;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Stripe webhook processing failed.";
+    const message = paymentErrorDiagnostic(error).message;
     await db.update(stripeWebhookEvents).set({
       status: "failed",
       lastError: message.slice(0, 2000),

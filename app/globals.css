@@ -415,6 +415,16 @@ button, input, textarea, select { font: inherit; }
 .dash-section-title a, .dash-section-title button { border: 0; background: transparent; color: var(--coral); display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 850; cursor: pointer; }
 .mission-list-row { padding: 17px 22px; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto 20px; gap: 14px; align-items: center; border-bottom: 1px solid #edf0f0; transition: background .2s; }
 .mission-list-row:hover { background: #fbfdfc; }
+.customer-payment-ledger .mission-list-row { grid-template-columns: 44px minmax(0, 1fr) auto minmax(150px, 210px); }
+.payment-ledger-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 0; }
+.payment-ledger-actions .list-meta { align-items: stretch; }
+.payment-ledger-actions .claim-button { min-height: 40px; font-size: 12px; white-space: normal; width: 100%; }
+.payment-check-action { display: flex; flex-direction: column; gap: 6px; }
+.payment-ledger-actions small { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .customer-payment-ledger .mission-list-row { grid-template-columns: 36px minmax(0, 1fr); }
+  .customer-payment-ledger .list-meta, .customer-payment-ledger .payment-ledger-actions { grid-column: 2; }
+}
 .mission-list-row:last-child { border-bottom: 0; }
 .list-icon { width: 43px; height: 43px; border-radius: 12px; background: #fff0eb; color: var(--coral); display: grid; place-items: center; }
 .list-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

@@ -9,6 +9,7 @@ import { Brand } from "./brand";
 import { MobileDashboardNav } from "./mobile-dashboard-nav";
 import { ScoutOnboardingProgressTracker } from "./scout-onboarding-progress";
 import type { ScoutOnboardingProgress } from "@/lib/scout-onboarding-progress";
+import { bookingMissionStatus } from "@/lib/payment-presentation";
 
 type Role = "customer" | "scout";
 type MissionKind = "see" | "move" | "meet";
@@ -19,6 +20,7 @@ export type DashboardMission = {
   title: string;
   place: string;
   status: string;
+  paymentStatus?: string;
   time: string;
   payoutCents?: number;
   assigned?: boolean;
@@ -115,11 +117,11 @@ function CustomerOverview({ missions }: { missions: DashboardMission[] }) {
       <div className="dash-section-title"><div><h2>Your missions</h2><p>Drafts and active work in one place.</p></div><Link href="/request">Create mission <IconArrowRight size={17} /></Link></div>
       {missions.length ? <div className="mission-list">{missions.map((mission) => {
         const Icon = iconFor(mission.type);
-        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.bundleLabel ?? labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{statusLabel(mission.status)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></Link>;
+        return <Link className="mission-list-row" href={`/dashboard/missions/${mission.id}`} key={mission.id}><span className="list-icon"><Icon size={22} /></span><div className="list-main"><small>{mission.bundleLabel ?? labelFor(mission.type)}</small><strong>{mission.title}</strong><span><IconMapPin size={14} /> {mission.place}</span></div><div className="list-meta"><span className={`status ${mission.status === "draft" ? "muted-status" : ""}`}>{bookingMissionStatus(mission.status, mission.paymentStatus)}</span><small>{mission.time}</small></div><IconArrowRight className="list-arrow" size={19} /></Link>;
       })}</div> : <EmptyMissions customer />}
     </section>
     <div className="empty-prompt"><span><IconCalendarRepeat size={30} /></span><div><h3>Saved missions and repeat schedules</h3><p>Reuse a template, review recurring work, or book a completed mission again.</p></div><Link className="button button-ghost button-small" href="/dashboard/customer/saved">Open saved</Link></div>
-    <div className="empty-prompt" id="payments"><span><IconShieldCheck size={30} /></span><div><h3>Payments activate at launch</h3><p>Customer payment will be authorized when a Scout accepts and released after successful completion.</p></div></div>
+    <div className="empty-prompt" id="payments"><span><IconShieldCheck size={30} /></span><div><h3>Payment before publication</h3><p>Your booking payment is collected securely through Stripe before your mission is offered to Scouts. Track confirmation and receipts in Payments.</p></div><Link href="/dashboard/customer/payments">View payments <IconArrowRight size={17} /></Link></div>
   </>;
 }
 
@@ -161,5 +163,5 @@ function EmptyMissions({ customer = false, profileStatus }: { customer?: boolean
 function Stat({ icon: Icon, label, value, note }: { icon: typeof IconTargetArrow; label: string; value: string; note: string }) { return <article className="stat-card"><span><Icon size={22} /></span><div><small>{label}</small><strong>{value}</strong><p>{note}</p></div></article>; }
 function iconFor(type: MissionKind) { return type === "see" ? IconCamera : type === "move" ? IconRoute : IconClock; }
 function labelFor(type: MissionKind) { return type === "see" ? "See It" : type === "move" ? "Move It" : "Meet It"; }
-function statusLabel(status: string) { return status === "draft" ? "Paused by support" : status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+function statusLabel(status: string) { return status.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
 function money(cents: number) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(cents / 100); }

@@ -26,6 +26,7 @@ export default async function CustomerDashboard() {
       title: activeLeg.title,
       place: `${activeLeg.city}, ${activeLeg.state} ${activeLeg.zip}`,
       status: activeLeg.status,
+      paymentStatus: bundle?.paymentStatus ?? activeLeg.paymentStatus,
       time: activeLeg.scheduledFor ? activeLeg.scheduledFor.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "ASAP",
       bundleParts,
       bundleLabel: bundleParts && bundleParts > 1
