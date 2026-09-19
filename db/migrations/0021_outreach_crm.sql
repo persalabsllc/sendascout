@@ -12,6 +12,7 @@ CREATE TABLE outreach_settings (
   lease_until timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+--> statement-breakpoint
 INSERT INTO outreach_settings(id) VALUES(1);
 --> statement-breakpoint
 CREATE TABLE outreach_prospects (
@@ -38,6 +39,7 @@ CREATE TABLE outreach_prospects (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+--> statement-breakpoint
 CREATE INDEX outreach_prospects_stage_idx ON outreach_prospects(stage,created_at);
 --> statement-breakpoint
 CREATE TABLE outreach_messages (
@@ -63,8 +65,11 @@ CREATE TABLE outreach_messages (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+--> statement-breakpoint
 CREATE UNIQUE INDEX outreach_one_followup_idx ON outreach_messages(followup_of) WHERE followup_of IS NOT NULL;
+--> statement-breakpoint
 CREATE INDEX outreach_messages_queue_idx ON outreach_messages(status,scheduled_at);
+--> statement-breakpoint
 CREATE UNIQUE INDEX outreach_one_active_send_idx ON outreach_messages(prospect_id) WHERE status IN ('queued','sending','unknown');
 --> statement-breakpoint
 CREATE TABLE outreach_oauth_states (

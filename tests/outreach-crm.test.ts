@@ -10,7 +10,7 @@ import { businessHours, normalizeEmail, parseProspectCsv, prospectInput, safeWeb
 import { decryptOutreachToken, encryptOutreachToken, outreachRawEmail } from "../lib/outreach-mail.ts";
 import { claimOutreachMessage, reconcileOutreachCustomers, suppressOutreach } from "../lib/outreach-sql.ts";
 const pg=new PGlite(),dialect=new PgDialect();const admin=crypto.randomUUID(),lease=crypto.randomUUID();
-before(async()=>{for(const m of readMigrationFiles({migrationsFolder:"./db/migrations"}))for(const s of m.sql)await pg.exec(s);await pg.query("INSERT INTO users(id,clerk_user_id,email,role) VALUES($1,'crm-test','admin@example.test','admin')",[admin]);});
+before(async()=>{for(const m of readMigrationFiles({migrationsFolder:"./db/migrations"}))for(const s of m.sql){if(!s.trim())continue;if(m.folderMillis===1789844400000)await pg.query(s);else await pg.exec(s);}await pg.query("INSERT INTO users(id,clerk_user_id,email,role) VALUES($1,'crm-test','admin@example.test','admin')",[admin]);});
 beforeEach(async()=>{await pg.exec("DELETE FROM outreach_messages; DELETE FROM outreach_prospects;");await pg.query("UPDATE outreach_settings SET paused=false,daily_limit=10,postal_address='Fixture business address',mailbox='support@sendascout.com',refresh_token_encrypted='fixture',lease_token=$1,lease_until=now()+interval '6 minutes',last_error=NULL",[lease]);});
 after(()=>pg.close());
 async function execute(query:Parameters<typeof dialect.sqlToQuery>[0]) {const q=dialect.sqlToQuery(query);return pg.query(q.sql,q.params);}
