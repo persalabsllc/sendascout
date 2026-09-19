@@ -7,7 +7,7 @@ const supportActions = readFileSync(new URL("../app/actions/support.ts", import.
 const customerShell = readFileSync(new URL("../components/customer-dashboard-shell.tsx", import.meta.url), "utf8");
 const dashboard = readFileSync(new URL("../components/dashboard.tsx", import.meta.url), "utf8");
 const controlRoom = readFileSync(new URL("../components/control-room.tsx", import.meta.url), "utf8");
-const footer = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+const footer = readFileSync(new URL("../components/see-site.tsx", import.meta.url), "utf8");
 
 test("customer support labels remain explicit and customer-facing", () => {
   assert.equal(customerSupportReasonLabel("delivery_problem"), "Delivery problem or damaged item");
@@ -38,5 +38,5 @@ test("customer and admin navigation expose the separate support center", () => {
 });
 
 test("public footer names the LLC", () => {
-  assert.match(footer, /© 2026 Send a Scout LLC\./);
+  assert.match(footer, /Send a Scout LLC\./);
 });

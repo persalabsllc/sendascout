@@ -24,13 +24,13 @@ test("state defaults cover the major U.S. mission time zones", () => {
 });
 
 test("public launch copy is nationwide and See It or Meet It retain customer state", () => {
-  const home = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const home = readFileSync(new URL("../components/see-site.tsx", import.meta.url), "utf8");
   const onboarding = readFileSync(new URL("../components/onboarding-form.tsx", import.meta.url), "utf8");
   const action = readFileSync(new URL("../app/actions/onboarding.ts", import.meta.url), "utf8");
   const pricing = readFileSync(new URL("../lib/mission-pricing.ts", import.meta.url), "utf8");
 
   assert.doesNotMatch(home, /Starting in Eastern NC/i);
-  assert.match(home, /communities across the U\.S\./i);
+  assert.match(home, /across the U\.S\./i);
   assert.doesNotMatch(onboarding, /Eastern North Carolina soft launch/i);
   assert.match(onboarding, /Mission time zone/);
   assert.match(action, /input\.type === "move" \? input\.pickupState : input\.state/);

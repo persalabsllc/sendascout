@@ -7,17 +7,17 @@ const manrope = Manrope({ subsets: ["latin"], variable: "--font-manrope" });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://sendascout.com"),
-  title: "Send a Scout | Your trusted local presence, on demand",
+  title: "Send a Scout | Need eyes somewhere?",
   description:
-    "Send a trusted local Scout to check it, move it, meet it, or wait for it—when you can't be there yourself.",
+    "Get current photos, video, and answers from a real person on location. Property, vehicle, purchase, and project checks with a PDF report.",
   alternates: { canonical: "/" },
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
     apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
   },
   openGraph: {
-    title: "Send a Scout | Your trusted local presence, on demand",
-    description: "Need someone there? Send a vetted local Scout.",
+    title: "Send a Scout | Need eyes somewhere?",
+    description: "Need eyes somewhere? Get current photos, video, and answers without making the trip.",
     url: "https://sendascout.com",
     siteName: "Send a Scout",
     type: "website",

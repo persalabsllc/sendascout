@@ -1,3 +1,5 @@
+import { type SeeSnapshot } from "@/lib/see-it";
+import { seeReports } from "@/db/schema";
 import { and, asc, eq, inArray, or, isNotNull, isNull, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { MissionWorkspace } from "@/components/mission-workspace";
@@ -23,6 +25,7 @@ import { scoutCanBrowseOpenMissions } from "@/lib/scout-mission-access";
 import { getStripeLivemode } from "@/lib/stripe";
 import { LEGAL_VERSION } from "@/lib/legal";
 
+export const maxDuration = 300;
 export const metadata = { title: "Mission | Send a Scout", robots: { index: false, follow: false } };
 
 export default async function MissionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -61,7 +64,8 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
     role = "scout";
     planningMapPrecision = profile.status === "approved" ? 3 : 2;
     canClaim = profile.status === "approved"
-      && scoutReadyForApproval({ ...profile, ...user }, LEGAL_VERSION, getStripeLivemode());
+      && scoutReadyForApproval({ ...profile, ...user }, LEGAL_VERSION, getStripeLivemode())
+      && (!mission.seeTemplateKey || Boolean(mission.seeAssignmentCutoffAt && mission.seeAssignmentCutoffAt > new Date()));
     if (!canClaim) {
       const nextStep = nextScoutOnboardingStep({ ...profile, ...user }, LEGAL_VERSION, getStripeLivemode(), profile.status);
       const currentPath = `/dashboard/missions/${encodeURIComponent(id)}`;
@@ -128,15 +132,18 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
   const isActiveBundleLeg = !bundle || mission.bundleSequence === bundle.activeSequence;
   const isFinalBundleLeg = !bundle || mission.id === finalLeg.id;
 
+  const seeContract = mission.seeTemplateSnapshot as SeeSnapshot | null;
+  const [latestReport] = seeContract && showFullAddress ? await db.select().from(seeReports).where(and(eq(seeReports.missionId, mission.id), eq(seeReports.revision, mission.seeReportRevision))).limit(1) : [];
   return <MissionWorkspace
     role={role}
     canClaim={canClaim}
     claimRequirement={claimRequirement}
     mission={{
       id: mission.id,
+      see: seeContract ? {templateName:seeContract.template.name,templateKey:seeContract.template.key,maxPhotos:seeContract.template.maxPhotos,maxVideos:seeContract.template.maxVideos,deadline:mission.seeDeadlineAt?.toISOString()??null,cutoff:mission.seeAssignmentCutoffAt?.toISOString()??null,earliest:mission.seeEarliestVisitAt?.toISOString()??null,reportStatus:mission.seeReportStatus,revision:mission.seeReportRevision,releasedAt:mission.seeReportReleasedAt?.toISOString()??null,reviewNote:latestReport?.reviewNote??null,tasks:seeContract.template.tasks,report:latestReport && (role!=="customer" || mission.seeReportStatus==="ready") ? latestReport.snapshot : null} : null,
       type: mission.type,
       status: mission.status,
-      title: mission.title,
+      title: !showFullAddress && seeContract ? seeContract.template.name : mission.title,
       instructions: showFullAddress ? mission.instructions : "Full instructions become available after you claim the mission.",
       pickup,
       pickupInstructions: showFullAddress ? mission.pickupInstructions : null,
@@ -233,6 +240,7 @@ export default async function MissionPage({ params }: { params: Promise<{ id: st
       responseType: item.responseType,
       required: item.required,
       responseText: item.responseText,
+      guidance: item.guidance,
       mediaUrls: accessibleEvidenceRows.filter((evidence) => evidence.checklistItemId === item.id).map((evidence) => privateMediaUrl(mission.id, evidence.storagePath)),
     }))}
     changeOrders={changeOrderRows.map((order) => ({

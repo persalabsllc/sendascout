@@ -19,6 +19,7 @@ import {
   scoutProfiles,
   users,
 } from "@/db/schema";
+import { getSeeTemplate, normalizeSeeConfiguration, seeChecklist, seePrice, SEE_TEMPLATE_VERSION, type SeeConfiguration } from "@/lib/see-it";
 import { requireAppUser } from "@/lib/app-user";
 import { calculateMissionQuote, type MissionPriceQuote } from "@/lib/mission-pricing";
 import { hashDeliveryPin, normalizeDeliveryPin } from "@/lib/delivery-pin";
@@ -40,6 +41,7 @@ export type MissionChecklistDraft = {
 export type MissionRecurrence = "once" | "weekly" | "biweekly" | "monthly";
 
 export type MissionInput = {
+  seeConfiguration?: SeeConfiguration;
   type: "see" | "move" | "meet";
   address: string;
   addressLine2: string;
@@ -136,9 +138,16 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 export async function getMissionPriceQuote(input: MissionInput): Promise<MissionCreationQuote> {
   await requireAppUser("customer");
-  const base = await calculateMissionQuote(input);
-  const enhancedCustomer = input.enhancedReport ? ENHANCED_REPORT_CUSTOMER_CENTS : 0;
-  const enhancedScout = input.enhancedReport ? ENHANCED_REPORT_SCOUT_CENTS : 0;
+  let base = await calculateMissionQuote(input);
+  if (input.seeConfiguration) {
+    if (input.type !== "see" || input.addMoveLeg || input.recurrence !== "once") throw new Error("See It packages are single-location, one-time checks.");
+    const config = normalizeSeeConfiguration(input.seeConfiguration);
+    if (config.serviceLevel === "priority" && !(process.env.SEE_IT_PRIORITY_ZIPS ?? "").split(",").map(v => v.trim()).filter(Boolean).includes(input.zip.trim())) throw new Error("Priority is not available in this ZIP yet. Choose Standard.");
+    const price = seePrice(config);
+    base = { ...base, customerPriceCents: price.customer, scoutPayoutCents: price.scout, platformFeeCents: price.customer - price.scout, maximumCustomerPriceCents: price.customer, maximumScoutPayoutCents: price.scout };
+  }
+  const enhancedCustomer = input.enhancedReport && !input.seeConfiguration ? ENHANCED_REPORT_CUSTOMER_CENTS : 0;
+  const enhancedScout = input.enhancedReport && !input.seeConfiguration ? ENHANCED_REPORT_SCOUT_CENTS : 0;
   const rootLine = {
     customerPriceCents: base.customerPriceCents + enhancedCustomer,
     scoutPayoutCents: base.scoutPayoutCents + enhancedScout,
@@ -167,7 +176,7 @@ export async function getMissionPriceQuote(input: MissionInput): Promise<Mission
     bundledMoveQuote,
     itemized: [
       { label: `${missionLabel(input.type)} service`, customerPriceCents: base.customerPriceCents },
-      ...(input.enhancedReport ? [{ label: "Enhanced mission report", customerPriceCents: ENHANCED_REPORT_CUSTOMER_CENTS }] : []),
+      ...(input.enhancedReport && !input.seeConfiguration ? [{ label: "Enhanced mission report", customerPriceCents: ENHANCED_REPORT_CUSTOMER_CENTS }] : []),
       ...(bundledMoveQuote ? [{ label: "Move It follow-up", customerPriceCents: bundledMoveQuote.customerPriceCents }] : []),
       ...(bundle.bundleDiscountCents ? [{ label: "Multi-mission discount", customerPriceCents: -bundle.bundleDiscountCents }] : []),
     ],
@@ -176,6 +185,9 @@ export async function getMissionPriceQuote(input: MissionInput): Promise<Mission
 
 export async function createMission(input: MissionInput): Promise<OnboardingResult> {
   try {
+    const seeConfig = input.seeConfiguration ? normalizeSeeConfiguration(input.seeConfiguration) : null;
+    if (input.type === "see" && !seeConfig) throw new Error("Start your See It request with one of the new structured checks at /request. Existing booked missions keep their original terms.");
+    if (seeConfig) input = { ...input, seeConfiguration: seeConfig, enhancedReport: false, title: `${getSeeTemplate(seeConfig.templateKey)!.name}: ${seeConfig.subject}`, instructions: [seeConfig.focus || "Complete the standard checklist.", `Access: ${seeConfig.access}. ${seeConfig.accessInstructions}`, seeConfig.visitHours ? `Visit hours: ${seeConfig.visitHours}` : ""].filter(Boolean).join("\n") };
     validateMissionInput(input);
     const user = await requireAppUser("customer");
     if (user.role !== "customer") throw new Error("Only customer accounts can publish missions.");
@@ -203,6 +215,11 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
     const recurrenceId = reviewedRecurrence?.id ?? createdRecurrenceId;
     const missionTimeZone = normalizeMissionTimeZone(reviewedRecurrence?.timeZone ?? input.timeZone);
     const scheduledFor = reviewedRecurrence?.occurrenceAt ?? (input.scheduledFor ? localDateTimeToUtc(input.scheduledFor, missionTimeZone) : null);
+    const seeAmounts = seeConfig ? seePrice(seeConfig) : null;
+    const seeDeadline = seeConfig?.completeBy ? localDateTimeToUtc(seeConfig.completeBy, missionTimeZone) : null;
+    const seeEarliest = seeConfig?.earliestVisit ? localDateTimeToUtc(seeConfig.earliestVisit, missionTimeZone) : null;
+    if (seeDeadline && (seeDeadline.getTime() < now.getTime() + 12 * 3600000 || seeDeadline.getTime() > now.getTime() + 14 * 86400000)) throw new Error("Choose a deadline between 12 hours and 14 days from now.");
+    if (seeEarliest && (seeEarliest.getTime() < now.getTime() - 3600000 || seeEarliest.getTime() >= (seeDeadline?.getTime() ?? now.getTime() + seeAmounts!.hours * 3600000) - 4 * 3600000)) throw new Error("Allow at least four hours between the earliest visit and completion target.");
     const preferredScoutExclusiveUntil = null;
     const pinPepper = ((input.type === "move" && input.deliveryPinRequired) || (input.addMoveLeg && input.bundleDeliveryPinRequired)) ? requireDeliveryPinSecret() : "";
     const deliveryPinHash = input.type === "move" && input.deliveryPinRequired
@@ -247,7 +264,14 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
       deliveryPinRequired: input.type === "move" && input.deliveryPinRequired,
       deliveryPinHash,
       proofOfDeliveryRequired: input.type === "move",
-      enhancedReportRequested: input.enhancedReport,
+      enhancedReportRequested: Boolean(seeConfig) || input.enhancedReport,
+      ...(seeConfig && seeAmounts ? {
+        seeTemplateKey: seeConfig.templateKey,
+        seeTemplateSnapshot: { version: SEE_TEMPLATE_VERSION, template: getSeeTemplate(seeConfig.templateKey)!, configuration: seeConfig },
+        seeServiceLevel: seeConfig.serviceLevel, seeWindowHours: seeAmounts.hours,
+        seeEarliestVisitAt: seeEarliest, seeDeadlineAt: seeDeadline,
+        seeBasePayoutCents: seeAmounts.scout, seePayoutCapCents: seeAmounts.cap,
+      } : {}),
       largeItem: input.type === "move" && input.largeItem,
       scheduledFor,
       timezone: missionTimeZone,
@@ -369,7 +393,9 @@ export async function createMission(input: MissionInput): Promise<OnboardingResu
         })
       : noOp();
     const childQuery = childMission ? db.insert(missions).values(childMission) : noOp();
-    const checklistQuery = input.enhancedReport
+    const checklistQuery = seeConfig
+      ? db.insert(missionChecklistItems).values(seeChecklist(seeConfig).map((item, index) => ({ missionId, sequence: index + 1, prompt: item.prompt, responseType: item.responseType, required: true, taskKey: item.key, guidance: item.guidance })))
+      : input.enhancedReport
       ? db.insert(missionChecklistItems).values(input.checklistItems.map((item, index) => ({
           missionId,
           sequence: index + 1,

@@ -1,5 +1,7 @@
 "use client";
 
+import { SeeEvidenceForm } from "./see-evidence-form";
+import { SeeMissionPanel, type SeeMissionInfo } from "./see-mission-panel";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -21,6 +23,7 @@ import { formatDateTime } from "@/lib/time";
 
 type Status = "draft" | "open" | "claimed" | "en_route" | "onsite" | "en_route_pickup" | "at_pickup" | "en_route_dropoff" | "at_dropoff" | "submitted" | "completed" | "cancelled" | "disputed";
 type MissionView = {
+  see?: SeeMissionInfo | null;
   id: string;
   type: "see" | "move" | "meet";
   status: Status;
@@ -72,7 +75,7 @@ type EvidenceView = { mediaUrls: string[]; submittedAt: string | null };
 type ReviewView = { rating: number; review: string | null; tipCents: number } | null;
 type BundleView = { id: string; title: string; status: string; activeSequence: number; totalLegs: number; bundleDiscountCents: number; customerPriceCents: number; scoutPayoutCents: number } | null;
 type ItineraryLegView = { id: string; sequence: number; type: MissionView["type"]; status: Status; title: string; pickup: string; dropoff: string | null; active: boolean; current: boolean };
-type ChecklistView = { id: string; sequence: number; prompt: string; responseType: string; required: boolean; responseText: string | null; mediaUrls: string[] };
+type ChecklistView = { guidance?: string | null;  id: string; sequence: number; prompt: string; responseType: string; required: boolean; responseText: string | null; mediaUrls: string[] };
 type ChangeOrderView = { id: string; status: string; description: string; customerDeltaCents: number; scoutDeltaCents: number; proposedByMe: boolean; awaitingPayment: boolean; expiresAt: string | null };
 
 export function MissionWorkspace({ role, mission, bundle, itinerary, messages, results, deliveryProof, checklist, changeOrders, review, canClaim, claimRequirement, scoutPreferred }: { role: "customer" | "scout" | "admin"; mission: MissionView; bundle: BundleView; itinerary: ItineraryLegView[]; messages: MessageView[]; results: ResultView; deliveryProof: EvidenceView; checklist: ChecklistView[]; changeOrders: ChangeOrderView[]; review: ReviewView; canClaim: boolean; claimRequirement: { message: string; href?: string; label?: string } | null; scoutPreferred: boolean }) {
@@ -240,12 +243,13 @@ export function MissionWorkspace({ role, mission, bundle, itinerary, messages, r
         <Link className="mission-back" href={role === "scout" ? "/dashboard/scout" : role === "admin" ? "/control-room" : "/dashboard/customer"}><IconArrowLeft size={18} /> Back to dashboard</Link>
         <header className="mission-hero">
           <div><span className="kicker">{missionLabel(mission.type)}</span><h1>{mission.title}</h1><p><IconMapPin size={17} /> {mission.pickup}</p></div>
-          <div className="mission-state"><small>Current status</small><strong>{statusLabel(mission.type, mission.status)}</strong></div>
+          <div className="mission-state"><small>Current status</small><strong>{mission.see && mission.status === "open" ? "Finding your Scout" : statusLabel(mission.type, mission.status)}</strong></div>
         </header>
 
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="mission-work-grid">
           <section className="mission-column">
+            {mission.see && <SeeMissionPanel info={mission.see} missionId={mission.id} status={mission.status} timeZone={mission.timeZone} role={role} />}
             {bundle && <BundleItineraryPanel bundle={bundle} itinerary={itinerary} role={role} />}
             {bundle && !mission.isActiveBundleLeg && <article className="mission-panel case-pending-panel"><IconClock size={25} /><div><h2>This part is not active</h2><p>Only part {bundle.activeSequence} can be updated right now. Open the highlighted itinerary part to continue.</p><Link className="button button-small" href={`/dashboard/missions/${itinerary.find((leg) => leg.active)?.id ?? mission.id}`}>Open active part</Link></div></article>}
             <article className="mission-panel route-panel">
@@ -289,7 +293,8 @@ export function MissionWorkspace({ role, mission, bundle, itinerary, messages, r
             {role === "scout" && assigned && mission.isActiveBundleLeg && !["submitted", "completed", "cancelled", "disputed"].includes(mission.status) && <MissionCasePanel role="scout" status={mission.status} pending={pending} submit={(kind, summary) => run(() => openMissionCase(mission.id, kind, summary))} />}
             {mission.status === "disputed" && <article className="mission-panel case-pending-panel"><IconAlertTriangle size={25} /><div><h2>Mission paused for Control Room review</h2><p>Status changes, verified time and payout release are paused while the mission record is reviewed. Updates will appear here and by email.</p></div></article>}
 
-            {role === "scout" && assigned && mission.isActiveBundleLeg && readyForResults(mission) && <article className="mission-panel result-form-panel">
+            {mission.see && role === "scout" && assigned && readyForResults(mission) && <SeeEvidenceForm missionId={mission.id} tasks={checklist} maxPhotos={mission.see.maxPhotos} maxVideos={mission.see.maxVideos} />}
+            {!mission.see && role === "scout" && assigned && mission.isActiveBundleLeg && readyForResults(mission) && <article className="mission-panel result-form-panel">
               <div className="panel-heading"><IconFileUpload size={22} /><div><h2>{mission.type === "see" ? "Submit what you found" : mission.type === "move" ? "Submit delivery proof" : "Submit appointment results"}</h2><p>These notes and files go directly to the paying customer.</p></div></div>
               {checklist.length > 0 && <fieldset><legend>Required mission report</legend>{checklist.map((item) => {
                 const answer = checklistAnswers[item.id] ?? { text: "", files: [] };
@@ -306,13 +311,13 @@ export function MissionWorkspace({ role, mission, bundle, itinerary, messages, r
               {mission.deliveryPinRequired && !mission.deliveryPinVerified && <small>Verify the recipient PIN before submitting.</small>}
             </article>}
 
-            {(results.summary || results.mediaUrls.length > 0) && <ResultPanel results={results} />}
+            {!mission.see && (results.summary || results.mediaUrls.length > 0) && <ResultPanel results={results} />}
             {deliveryProof.mediaUrls.length > 0 && <DeliveryProofPanel evidence={deliveryProof} />}
-            {checklist.some((item) => item.responseText || item.mediaUrls.length) && !readyForResults(mission) && <ChecklistReportPanel checklist={checklist} />}
+            {!mission.see && checklist.some((item) => item.responseText || item.mediaUrls.length) && !readyForResults(mission) && <ChecklistReportPanel checklist={checklist} />}
 
-            {role === "customer" && mission.status === "submitted" && mission.isFinalBundleLeg && <article className="mission-panel completion-panel review-panel"><IconCheck size={28} /><div><h2>Confirm and rate your Scout</h2><p>Review the result, rate the service and optionally leave a tip.</p><div className="star-picker" aria-label="Scout rating">{[1, 2, 3, 4, 5].map((star) => <button type="button" aria-label={`${star} star${star === 1 ? "" : "s"}`} aria-pressed={rating === star} className={rating >= star ? "selected" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><textarea aria-label="Optional Scout review" maxLength={1500} rows={3} placeholder="Optional note about your experience" value={reviewText} onChange={(event) => setReviewText(event.target.value)} /><div className="tip-picker"><span>Optional tip</span>{[0, 300, 500, 1000].map((amount) => <button type="button" aria-pressed={tipCents === amount} className={tipCents === amount ? "selected" : ""} key={amount} onClick={() => setTipCents(amount)}>{amount ? money(amount) : "No tip"}</button>)}</div><small>Tips are recorded during testing and will be charged only after secure payments are activated.</small></div><button className="button" disabled={pending || rating === 0} onClick={() => run(() => confirmMissionComplete(mission.id, rating, reviewText, tipCents))}>Confirm completion</button></article>}
+            {role === "customer" && mission.status === "submitted" && (!mission.see || mission.see.reportStatus === "ready") && mission.isFinalBundleLeg && <article className="mission-panel completion-panel review-panel"><IconCheck size={28} /><div><h2>Confirm and rate your Scout</h2><p>Review the result, rate the service and optionally leave a tip.</p><div className="star-picker" aria-label="Scout rating">{[1, 2, 3, 4, 5].map((star) => <button type="button" aria-label={`${star} star${star === 1 ? "" : "s"}`} aria-pressed={rating === star} className={rating >= star ? "selected" : ""} key={star} onClick={() => setRating(star)}>★</button>)}</div><textarea aria-label="Optional Scout review" maxLength={1500} rows={3} placeholder="Optional note about your experience" value={reviewText} onChange={(event) => setReviewText(event.target.value)} /><div className="tip-picker"><span>Optional tip</span>{[0, 300, 500, 1000].map((amount) => <button type="button" aria-pressed={tipCents === amount} className={tipCents === amount ? "selected" : ""} key={amount} onClick={() => setTipCents(amount)}>{amount ? money(amount) : "No tip"}</button>)}</div><small>Tips are recorded during testing and will be charged only after secure payments are activated.</small></div><button className="button" disabled={pending || rating === 0} onClick={() => run(() => confirmMissionComplete(mission.id, rating, reviewText, tipCents))}>Confirm completion</button></article>}
             {review && <article className="mission-panel customer-review-panel"><div><span className="review-stars">{"★".repeat(review.rating)}{"☆".repeat(5 - review.rating)}</span><h2>Customer rating</h2>{review.review && <p>{review.review}</p>}{review.tipCents > 0 && <small>{money(review.tipCents)} tip selected</small>}</div></article>}
-            {role === "customer" && mission.bookingCompleted && <article className="mission-panel claim-panel"><IconRoute size={28} /><div><h2>Need this again?</h2><p>Reuse the locations and instructions, review the latest price, and optionally offer it to {mission.scoutName ?? "your Scout"} first.</p></div><div className="mission-case-actions"><Link className="button" href={`/request?repeat=${itinerary[0]?.id ?? mission.id}`}>Book again</Link>{mission.scoutName && <button className="button button-ghost" disabled={pending} onClick={() => run(() => setPreferredScoutFromMission(mission.id, !scoutPreferred))}>{scoutPreferred ? "Remove preferred Scout" : `Prefer ${mission.scoutName}`}</button>}</div></article>}
+            {role === "customer" && mission.bookingCompleted && <article className="mission-panel claim-panel"><IconRoute size={28} /><div><h2>Need this again?</h2><p>Reuse the locations and instructions, review the latest price, and optionally offer it to {mission.scoutName ?? "your Scout"} first.</p></div><div className="mission-case-actions"><Link className="button" href={mission.see ? `/request?check=${mission.see.templateKey}` : `/request?repeat=${itinerary[0]?.id ?? mission.id}`}>Book again</Link>{mission.scoutName && <button className="button button-ghost" disabled={pending} onClick={() => run(() => setPreferredScoutFromMission(mission.id, !scoutPreferred))}>{scoutPreferred ? "Remove preferred Scout" : `Prefer ${mission.scoutName}`}</button>}</div></article>}
           </section>
 
           <aside className="mission-column">

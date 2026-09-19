@@ -3,6 +3,7 @@ import { eq, or } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db";
 import { users } from "@/db/schema";
+import { safeLocalReturn } from "@/lib/see-it";
 import { hasCurrentLegalAcceptance } from "@/lib/legal";
 
 export type AppRole = "customer" | "scout" | "admin";
@@ -49,9 +50,9 @@ export async function requireAuthenticatedAppUser(preferredRole: AppRole = "cust
   return created;
 }
 
-export async function requireAppUser(preferredRole: AppRole = "customer") {
+export async function requireAppUser(preferredRole: AppRole = "customer", returnTo?: string) {
   const user = await requireAuthenticatedAppUser(preferredRole);
-  if (!hasCurrentLegalAcceptance(user)) redirect("/legal/accept");
+  if (!hasCurrentLegalAcceptance(user)) redirect(returnTo ? `/legal/accept?next=${encodeURIComponent(safeLocalReturn(returnTo))}` : "/legal/accept");
   return user;
 }
 

@@ -26,7 +26,7 @@ export function ControlRoom({ stats, missions, cases, messageNotifications, oper
     });
   }
   return <main className="control-page">
-    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room/analytics">Analytics</Link><Link href="/control-room/customers">Customers</Link><Link href="/control-room/scouts">Scouts</Link><Link href="/control-room/support">Support</Link><Link href="/">Public site</Link></div></header>
+    <header className="control-header"><Brand href="/control-room" /><div><span>Private operations</span><Link href="/control-room/see-it">See It operations</Link><Link href="/control-room/analytics">Analytics</Link><Link href="/control-room/customers">Customers</Link><Link href="/control-room/scouts">Scouts</Link><Link href="/control-room/support">Support</Link><Link href="/">Public site</Link></div></header>
     <div className="control-shell">
       <div className="control-title"><div><span className="kicker">Send a Scout Control Room</span><h1>Marketplace operations</h1><p>Monitor Scout onboarding, release missions and oversee every active job.</p></div><div className="control-title-actions"><Link className="button button-small button-ghost" href="/control-room/support"><IconLifebuoy size={17} /> Customer support</Link><Link className="button button-small" href="/control-room/procedures"><IconBook2 size={17} /> Operations playbook</Link></div></div>
       {error && <p className="form-error" role="alert">{error}</p>}

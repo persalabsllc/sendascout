@@ -1,3 +1,6 @@
+import { type SeeSnapshot, type SeeConfiguration } from "@/lib/see-it";
+import { SeeRequest } from "@/components/see-request";
+import { SeeHeader, SeeFooter } from "@/components/see-site";
 import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
@@ -10,12 +13,16 @@ import { scoutClaimReadinessConditions } from "@/lib/scout-claim-readiness";
 import { getStripeLivemode } from "@/lib/stripe";
 import { dateTimeLocalValue } from "@/lib/time";
 
-type RequestSearchParams = { type?: string; repeat?: string; template?: string; recurrence?: string; occurrence?: string };
+type RequestSearchParams = { check?: string; address?: string; type?: string; repeat?: string; template?: string; recurrence?: string; occurrence?: string };
 
 export default async function RequestPage({ searchParams }: { searchParams: Promise<RequestSearchParams> }) {
   const params = await searchParams;
   const requestPath = requestPathFor(params);
   const { userId } = await auth();
+  if (!params.repeat && !params.template && !params.recurrence && !["move-it", "meet-it"].includes(params.type ?? "")) {
+    const customer = userId ? await requireAppUser("customer", `/request${params.check ? `?check=${encodeURIComponent(params.check)}` : ""}`) : null;
+    return <main className="see-site"><SeeHeader /><SeeRequest initialCheck={params.check} initialAddress={params.address} signedIn={Boolean(userId)} initialPhone={customer?.phone ?? ""} priorityZips={(process.env.SEE_IT_PRIORITY_ZIPS ?? "").split(",").map(v => v.trim()).filter(Boolean)} /><SeeFooter /></main>;
+  }
   if (!userId) redirect(`/sign-in?redirect_url=${encodeURIComponent(requestPath)}`);
   const user = await requireAppUser("customer");
   if (!user.profileCompletedAt) redirect(`/dashboard/customer/profile?next=${encodeURIComponent(requestPath)}`);
@@ -42,6 +49,11 @@ export default async function RequestPage({ searchParams }: { searchParams: Prom
   else if (validUuid(params.template)) initialMission = await loadTemplatePrefill(db, user.id, params.template);
   if (initialMission?.preferredScoutId && !preferredScouts.some((scout) => scout.id === initialMission?.preferredScoutId)) initialMission.preferredScoutId = "";
 
+  if (initialMission?.type === "see") {
+    const previous = initialMission.seeConfiguration;
+    const configuration: SeeConfiguration = previous ? { ...previous, earliestVisit: "", completeBy: "", accessConfirmed: false, serviceLevel: "standard" } : { templateKey: "custom", subject: initialMission.title || "Repeat visual check", focus: initialMission.instructions || "Document the requested location and visible condition.", access: "public", accessInstructions: "", visitHours: "", earliestVisit: "", completeBy: "", serviceLevel: "standard", extraQuestions: (initialMission.checklistItems ?? []).filter(item => item.responseType === "text").slice(0,5).map(item => item.prompt), accessConfirmed: false };
+    return <main className="see-site"><SeeHeader /><SeeRequest signedIn initialOrder={{configuration,address:initialMission.address??"",addressLine2:initialMission.addressLine2??"",city:initialMission.city??"",state:initialMission.state??"",zip:initialMission.zip??"",timeZone:initialMission.timeZone??"America/New_York",phone:user.phone??""}} /><SeeFooter /></main>;
+  }
   const typeFromPath = params.type === "move-it" ? "move" : params.type === "meet-it" ? "meet" : "see";
   return <OnboardingForm
     mode="customer"
@@ -78,6 +90,7 @@ async function loadMissionPrefill(db: ReturnType<typeof getDb>, customerId: stri
   ]);
   return {
     type: mission.type,
+    seeConfiguration: mission.seeTemplateSnapshot ? (mission.seeTemplateSnapshot as SeeSnapshot).configuration : undefined,
     sourceMissionId: mission.id,
     templateId: "",
     preferredScoutId: mission.scoutId ?? mission.preferredScoutId ?? "",

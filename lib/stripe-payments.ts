@@ -611,6 +611,9 @@ export async function recordSuccessfulPaymentIntent(intent: Stripe.PaymentIntent
           payment_status = 'paid',
           stripe_payment_intent_id = ${intent.id},
           alert_generation = root.alert_generation + 1,
+          see_funded_at = CASE WHEN root.see_template_key IS NOT NULL THEN ${now} ELSE root.see_funded_at END,
+          see_deadline_at = CASE WHEN root.see_template_key IS NOT NULL THEN COALESCE(root.see_deadline_at, ${now}::timestamptz + make_interval(hours => root.see_window_hours)) ELSE root.see_deadline_at END,
+          see_assignment_cutoff_at = CASE WHEN root.see_template_key IS NOT NULL THEN COALESCE(root.see_deadline_at, ${now}::timestamptz + make_interval(hours => root.see_window_hours)) - interval '4 hours' ELSE root.see_assignment_cutoff_at END,
           preferred_scout_id = CASE
             WHEN root.preferred_scout_id IS NULL OR EXISTS (SELECT 1 FROM preferred_scout_readiness)
               THEN root.preferred_scout_id

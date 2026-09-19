@@ -18,7 +18,7 @@ const controlRoomPage = source("app/control-room/scouts/page.tsx");
 const controlRoomScouts = source("components/control-room-scouts.tsx");
 const scoutPayoutAccount = source("components/scout-payout-account.tsx");
 const scoutOnboarding = source("components/onboarding-form.tsx");
-const homepage = source("app/page.tsx");
+const homepage = source("components/see-site.tsx");
 
 const currentLegalVersion = "current";
 const readyScout: ScoutApprovalInput = {

@@ -29,7 +29,7 @@ export default async function ScoutMissionsPage() {
     isNull(missions.archivedAt),
     canBrowseOpen ? or(
       eq(missions.scoutId, user.id),
-      and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), or(
+      and(eq(missions.status, "open"), eq(missions.paymentStatus, "paid"), sql`(${missions.seeTemplateKey} IS NULL OR ${missions.seeAssignmentCutoffAt}>now())`, or(
         isNull(missions.preferredScoutId),
         eq(missions.preferredScoutId, user.id),
         isNotNull(missions.preferredScoutBroadcastAt),

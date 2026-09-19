@@ -1,3 +1,4 @@
+import { safeLocalReturn } from "@/lib/see-it";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { acceptLegalTerms } from "@/app/actions/legal";
@@ -7,9 +8,10 @@ import { hasCurrentLegalAcceptance, LEGAL_VERSION } from "@/lib/legal";
 
 export const metadata = { title: "Accept Marketplace Terms | Send a Scout", robots: { index: false, follow: false } };
 
-export default async function LegalAcceptancePage() {
+export default async function LegalAcceptancePage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+  const next = safeLocalReturn((await searchParams).next, "");
   const user = await requireAuthenticatedAppUser("customer");
-  if (hasCurrentLegalAcceptance(user)) redirect(user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer");
+  if (hasCurrentLegalAcceptance(user)) redirect(next || (user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer"));
 
   return <main className="legal-accept-page">
     <header><Brand href="/" /><span>Agreement version {LEGAL_VERSION}</span></header>
@@ -24,7 +26,7 @@ export default async function LegalAcceptancePage() {
         <article><strong>Individual arbitration</strong><p>Most disputes must be resolved through individual binding arbitration, with small-claims and opt-out rights.</p></article>
       </div>
       <p className="legal-document-links"><Link href="/terms" target="_blank">Terms of Service</Link><Link href="/policies" target="_blank">Marketplace & Refund Policies</Link><Link href="/privacy" target="_blank">Privacy Notice</Link></p>
-      <form action={acceptLegalTerms} className="legal-accept-form">
+      <form action={acceptLegalTerms} className="legal-accept-form"><input type="hidden" name="next" value={next} />
         <label><input type="checkbox" name="agreements" value="accepted" required /><span>I have read and agree to the <Link href="/terms" target="_blank">Terms of Service</Link> and <Link href="/policies" target="_blank">Marketplace Policies</Link>, acknowledge the <Link href="/privacy" target="_blank">Privacy Notice</Link>, and consent to electronic records and signatures.</span></label>
         <label className="arbitration-consent"><input type="checkbox" name="arbitration" value="accepted" required /><span>I specifically agree to the binding individual arbitration agreement and class-action and jury-trial waivers in the Terms, including the right to opt out within 30 days.</span></label>
         <button className="button" type="submit">Accept and enter Send a Scout</button>

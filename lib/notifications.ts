@@ -1,3 +1,5 @@
+import { seeAlertRadius } from "@/lib/see-it";
+import { distanceBetweenZips } from "@/lib/geography";
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -81,9 +83,16 @@ function preferredAlertIsExclusive(mission: MissionAlertRecord) {
   return Boolean(mission.preferredScoutId && !mission.preferredScoutBroadcastAt);
 }
 
+function withinSeeAlertWindow(mission: MissionAlertRecord, scout: { homeZip: string | null }) {
+  if (!mission.seeTemplateKey) return true;
+  if (!mission.seeAssignmentCutoffAt || mission.seeAssignmentCutoffAt <= new Date()) return false;
+  const distance = distanceBetweenZips(scout.homeZip, mission.zip);
+  return distance !== null && distance <= seeAlertRadius(mission.seeFundedAt, mission.seeDeadlineAt);
+}
+
 function missionAlertCopy(mission: MissionAlertRecord, legs: MissionAlertRecord[], bundle: MissionBundleRecord | null, preferredOnly: boolean) {
   const labels = legs.map((leg) => missionLabel(leg.type));
-  const title = preferredOnly
+  const title = mission.seeTemplateKey && mission.seeOfferVersion > 0 ? "Higher payout: photo mission nearby" : preferredOnly
     ? `${labels.join(" + ")} offered to you first`
     : `New ${labels.join(" + ")} mission nearby`;
   const payoutCents = bundle?.scoutPayoutCents ?? mission.scoutPayoutCents;
@@ -214,7 +223,7 @@ async function scoutStillEligibleForMissionAlert(scoutUserId: string, missionId:
       isNull(missions.archivedAt),
     )).orderBy(asc(missions.bundleSequence))
     : [mission];
-  if (!legs.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, scout))) return false;
+  if (!withinSeeAlertWindow(mission, scout) || !legs.every((leg) => leg.paymentStatus === "paid" && isMissionEligibleForScout(leg, scout))) return false;
   if (mission.bundleId) {
     const [bundle] = await db.select({ paymentStatus: missionBundles.paymentStatus })
       .from(missionBundles).where(eq(missionBundles.id, mission.bundleId)).limit(1);
@@ -1568,7 +1577,7 @@ export async function alertEligibleScouts(missionId: string) {
     .where(and(
       ...scoutClaimReadinessConditions(stripeLivemode),
     ));
-  const eligibleScouts = scoutRows.filter((scout) => legs.every((leg) => isMissionEligibleForScout(leg, scout)));
+  const eligibleScouts = scoutRows.filter((scout) => withinSeeAlertWindow(mission, scout) && legs.every((leg) => isMissionEligibleForScout(leg, scout)));
 
   const preferredOnly = preferredAlertIsExclusive(mission);
   const scouts = preferredOnly
@@ -1626,6 +1635,7 @@ export async function alertScoutToOpenMissions(scoutUserId: string) {
     legsByBundle.set(leg.bundleId, legs);
   }
   const candidates = roots.filter((mission) => {
+    if (!withinSeeAlertWindow(mission, scout)) return false;
     const preferredOnly = preferredAlertIsExclusive(mission);
     if (preferredOnly && mission.preferredScoutId !== scoutUserId) return false;
     if (mission.bundleId && bundleById.get(mission.bundleId)?.paymentStatus !== "paid") return false;

@@ -1,5 +1,6 @@
 "use server";
 
+import { safeLocalReturn } from "@/lib/see-it";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
@@ -35,5 +36,5 @@ export async function acceptLegalTerms(formData: FormData) {
   ]);
   if (user.role === "scout") await tryAutoApproveScout(user.id);
 
-  redirect(user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer");
+  redirect(safeLocalReturn(formData.get("next"), "") || (user.role === "scout" ? "/dashboard/scout" : user.role === "admin" ? "/control-room" : "/dashboard/customer"));
 }

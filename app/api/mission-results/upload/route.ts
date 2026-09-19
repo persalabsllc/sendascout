@@ -34,9 +34,9 @@ export async function POST(request: Request) {
           eq(missions.scoutId, user.id),
           eq(missions.status, mission.status),
           isNull(missions.archivedAt),
-          lt(missions.resultUploadTokenCount, 30),
+          lt(missions.resultUploadTokenCount, mission.seeTemplateKey ? 150 : 30),
         )).returning({ id: missions.id });
-        if (!authorized) throw new Error("Mission result uploads are limited to 30 files. Contact support if you need help completing this mission.");
+        if (!authorized) throw new Error("The upload retry allowance has been reached. Contact support for help completing this mission.");
         return {
           allowedContentTypes: ["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime", "video/webm"],
           maximumSizeInBytes: 50 * 1024 * 1024,

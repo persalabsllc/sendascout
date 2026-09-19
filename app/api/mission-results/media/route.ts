@@ -2,7 +2,7 @@ import { get } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { missionEvidence, missionUpdates, missions } from "@/db/schema";
+import { missionEvidence, missionUpdates, missions, seeMissionDrafts } from "@/db/schema";
 import { requireAppUser } from "@/lib/app-user";
 
 export async function GET(request: NextRequest) {
@@ -36,7 +36,9 @@ export async function GET(request: NextRequest) {
       || mission?.scoutId === user.id
       || (mission?.customerId === user.id && semanticEvidence.customerVisible)
     );
-    const evidenceAccess = semanticEvidence ? semanticAccess : Boolean(legacyEvidence && participant);
+    const [draft] = mission?.scoutId === user.id ? await db.select().from(seeMissionDrafts).where(and(eq(seeMissionDrafts.missionId, missionId), eq(seeMissionDrafts.scoutId, user.id))).limit(1) : [];
+    const draftAccess = Boolean(draft?.data.answers.some(answer => answer.files.some(file => file.path === pathname)));
+    const evidenceAccess = draftAccess || (semanticEvidence ? semanticAccess : Boolean(legacyEvidence && participant));
     if (!participant || !evidenceAccess) return new NextResponse("Not found", { status: 404 });
 
     const result = await get(pathname, {

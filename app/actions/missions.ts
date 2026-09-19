@@ -325,6 +325,7 @@ export async function claimMission(id: string): Promise<Result> {
           WHERE candidate.bundle_id = target_bundle.id
             AND candidate.archived_at IS NULL
             AND candidate.scout_id IS NULL
+            AND (candidate.see_template_key IS NULL OR candidate.see_assignment_cutoff_at > now())
             AND candidate.status IN ('open', 'draft')
             AND candidate.payment_status = 'paid'
             AND NOT EXISTS (
@@ -465,6 +466,7 @@ export async function claimMission(id: string): Promise<Result> {
               scout_headshot_path_snapshot = locked_profile.headshot_path,
               scout_identity_verified_at_snapshot = locked_profile.identity_verified_at,
               status = 'claimed',
+              see_accepted_payout_cents = CASE WHEN candidate.see_template_key IS NOT NULL THEN candidate.scout_payout_cents ELSE candidate.see_accepted_payout_cents END,
               claimed_at = ${now},
               updated_at = ${now}
           FROM locked_profile
@@ -472,6 +474,7 @@ export async function claimMission(id: string): Promise<Result> {
             AND candidate.status = 'open'
             AND candidate.payment_status = 'paid'
             AND candidate.scout_id IS NULL
+            AND (candidate.see_template_key IS NULL OR candidate.see_assignment_cutoff_at > now())
             AND candidate.archived_at IS NULL
             AND (
               candidate.preferred_scout_id IS NULL
@@ -577,6 +580,7 @@ export async function updateMissionStatus(id: string, nextStatus: MissionStatus)
     let verifiedArrival: ReturnType<typeof verifyScoutAtLocation> | null = null;
     if (nextStatus === "at_pickup" && mission.pickupLatitude && mission.pickupLongitude) verifiedArrival = verifyScoutAtLocation(mission, mission.pickupLatitude, mission.pickupLongitude);
     if (nextStatus === "at_dropoff" && mission.dropoffLatitude && mission.dropoffLongitude) verifiedArrival = verifyScoutAtLocation(mission, mission.dropoffLatitude, mission.dropoffLongitude);
+    if (mission.seeTemplateKey && nextStatus === "onsite" && mission.seeEarliestVisitAt && mission.seeEarliestVisitAt > now) throw new Error("The customer’s earliest permitted visit time has not arrived.");
     if (nextStatus === "onsite" && mission.pickupLatitude && mission.pickupLongitude) {
       verifiedArrival = verifyScoutAtLocation(mission, mission.pickupLatitude, mission.pickupLongitude);
     }
@@ -626,6 +630,7 @@ export async function submitMissionResults(
     const mission = await getMission(id);
     if (mission.scoutId !== user.id) throw new Error("Only the assigned Scout can submit results.");
     const bundleContext = await requireActiveBundleLeg(mission);
+    if (mission.seeTemplateKey) throw new Error("Use the structured See It checklist to submit this mission.");
     const ready = mission.type === "move" ? mission.status === "at_dropoff" : mission.status === "onsite";
     if (!ready) throw new Error("Finish the mission steps before submitting results.");
     const [acceptedUnpaidOrder] = await getDb().select({ id: missionChangeOrders.id }).from(missionChangeOrders).where(and(
@@ -1427,6 +1432,7 @@ export async function confirmMissionComplete(id: string, rating: number, review:
     const user = await requireAppUser("customer");
     const mission = await getMission(id);
     if (mission.customerId !== user.id || mission.status !== "submitted") throw new Error("This mission is not ready for confirmation.");
+    if (mission.seeTemplateKey && mission.seeReportStatus !== "ready") throw new Error("Your report must be ready before the mission can be approved.");
     if (!mission.scoutId) throw new Error("This mission does not have an assigned Scout.");
     const bundleContext = await requireActiveBundleLeg(mission);
     if (bundleContext) {
@@ -1453,6 +1459,7 @@ export async function confirmMissionComplete(id: string, rating: number, review:
           AND target.customer_id = ${user.id}
           AND target.scout_id = ${mission.scoutId}
           AND target.status = 'submitted'
+          AND (target.see_template_key IS NULL OR (target.see_report_status='ready' AND target.see_report_released_at IS NOT NULL))
           AND target.archived_at IS NULL
           AND (
             target.bundle_id IS NULL

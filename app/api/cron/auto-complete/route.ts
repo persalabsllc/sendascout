@@ -65,7 +65,7 @@ export async function GET(request: Request) {
       () => reconcileClaimedMissionNotifications(),
     );
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const pending = await db.select().from(missions).where(and(sql`${missions.archivedAt} IS NULL`, eq(missions.status, "submitted"), lte(missions.submittedAt, cutoff)));
+    const pending = await db.select().from(missions).where(and(sql`${missions.archivedAt} IS NULL`, eq(missions.status, "submitted"), lte(missions.submittedAt, cutoff), sql`(${missions.seeTemplateKey} IS NULL OR (${missions.seeReportStatus}='ready' AND ${missions.seeReportReleasedAt}<=${cutoff}))`));
     let completed = 0;
     for (const mission of pending) {
       const now = new Date();
@@ -75,6 +75,7 @@ export async function GET(request: Request) {
           SET status = 'completed', completed_at = ${now}, updated_at = ${now}
           WHERE target.id = ${mission.id}
             AND target.status = 'submitted'
+            AND (target.see_template_key IS NULL OR (target.see_report_status='ready' AND target.see_report_released_at<=${cutoff}))
             AND target.archived_at IS NULL
             AND (
               target.bundle_id IS NULL
@@ -106,7 +107,7 @@ export async function GET(request: Request) {
           RETURNING profile.user_id
         ), inserted_update AS (
           INSERT INTO mission_updates (mission_id, status, message)
-          SELECT id, 'completed'::mission_status, 'Automatically approved 24 hours after results were submitted.'
+          SELECT id, 'completed'::mission_status, 'Automatically approved after the 24-hour customer review window.'
           FROM completed_mission
           RETURNING id
         ), counts AS (
